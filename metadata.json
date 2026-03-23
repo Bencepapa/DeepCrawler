@@ -1,0 +1,5 @@
+{
+  "name": "Deep Space Crawler",
+  "description": "A grid-based first-person sci-fi dungeon crawler with Three.js",
+  "requestFramePermissions": []
+}
