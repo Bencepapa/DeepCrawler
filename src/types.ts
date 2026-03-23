@@ -19,6 +19,9 @@ export enum TileType {
   SERVICE_PATH_STRAIGHT = 17,
   SERVICE_PATH_JUNCTION = 18,
   BULKHEAD_DOOR = 19,
+  VERTICALLY_SEGMENTED_WALL = 20,
+  LAMP_WALL = 21,
+  SERVICE_TUNNEL = 22,
 }
 
 export enum Direction {

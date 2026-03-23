@@ -27,7 +27,10 @@ import {
   createCeilingLampGeometry,
   createSegmentedWallGeometry,
   createServicePathGeometry,
-  createBulkheadDoorGeometry
+  createBulkheadDoorGeometry,
+  createVerticallySegmentedWallGeometry,
+  createLampWallGeometry,
+  createServiceTunnelGeometry
 } from './geometries';
 import { 
   Enemy, 
@@ -155,7 +158,7 @@ export default function App() {
   const checkCollision = useCallback((x: number, z: number) => {
     if (x < 0 || x >= map[0].length || z < 0 || z >= map.length) return true;
     const tile = map[z][x];
-    return tile === TileType.WALL || tile === TileType.PILLAR || tile === TileType.ANGLED_WALL || tile === TileType.WINDOW_WALL || tile === TileType.DOOR || tile === TileType.BOX || tile === TileType.DISPLAY_WALL || tile === TileType.LIGHT_BOTTOM || tile === TileType.LIGHT_MIDDLE || tile === TileType.RADAR_WALL || tile === TileType.SEGMENTED_WALL || tile === TileType.BULKHEAD_DOOR;
+    return tile === TileType.WALL || tile === TileType.PILLAR || tile === TileType.ANGLED_WALL || tile === TileType.WINDOW_WALL || tile === TileType.DOOR || tile === TileType.BOX || tile === TileType.DISPLAY_WALL || tile === TileType.LIGHT_BOTTOM || tile === TileType.LIGHT_MIDDLE || tile === TileType.RADAR_WALL || tile === TileType.SEGMENTED_WALL || tile === TileType.BULKHEAD_DOOR || tile === TileType.VERTICALLY_SEGMENTED_WALL || tile === TileType.LAMP_WALL;
   }, [map]);
 
   const move = useCallback((forward: boolean) => {
@@ -442,7 +445,7 @@ export default function App() {
     fogRef.current = fog;
     sceneRef.current = scene;
 
-    const camera = new THREE.PerspectiveCamera(isMobileRef.current ? 85 : 75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const camera = new THREE.PerspectiveCamera(isMobileRef.current ? 105 : 95, window.innerWidth / window.innerHeight, 0.1, 1000);
     cameraRef.current = camera;
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -508,6 +511,14 @@ export default function App() {
     radarCtxRef.current = radarCtx;
     const radarTexture = new THREE.CanvasTexture(radarCanvas);
 
+    // Setup lamp canvas
+    const lampCanvas = document.createElement('canvas');
+    lampCanvas.width = 256;
+    lampCanvas.height = 256;
+    const lampCtx = lampCanvas.getContext('2d');
+    const lampTexture = new THREE.CanvasTexture(lampCanvas);
+    const lampCtxRef = { current: lampCtx };
+
     // Display animation setup
     const setup = (ctx: CanvasRenderingContext2D) => {
       ctx.fillStyle = '#000';
@@ -551,7 +562,7 @@ export default function App() {
       ctx.lineWidth = 1;
       map.forEach((row, z) => {
         row.forEach((tile, x) => {
-          if (tile !== TileType.EMPTY && tile !== TileType.VENT && tile !== TileType.KEY) {
+          if (tile !== TileType.EMPTY && tile !== TileType.VENT && tile !== TileType.KEY && tile !== TileType.SERVICE_TUNNEL) {
             ctx.strokeRect(x * scaleX, z * scaleY, scaleX, scaleY);
           }
         });
@@ -572,18 +583,58 @@ export default function App() {
       ctx.fill();
     };
 
+    const drawLamps = (ctx: CanvasRenderingContext2D, time: number) => {
+      ctx.fillStyle = '#111';
+      ctx.fillRect(0, 0, 256, 256);
+      
+      const rows = 8;
+      const cols = 8;
+      const spacing = 256 / 8;
+      
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const seed = r * cols + c;
+          const blink = Math.sin(time * 0.005 + seed * 1.5) > 0.5;
+          
+          if (blink) {
+            const colorSeed = (seed + Math.floor(time * 0.001)) % 3;
+            if (colorSeed === 0) ctx.fillStyle = '#ff0000';
+            else if (colorSeed === 1) ctx.fillStyle = '#00ff00';
+            else ctx.fillStyle = '#ffff00';
+          } else {
+            ctx.fillStyle = '#222';
+          }
+          
+          ctx.beginPath();
+          ctx.arc(c * spacing + spacing/2, r * spacing + spacing/2, 8, 0, Math.PI * 2);
+          ctx.fill();
+          
+          // Add a small glow
+          if (blink) {
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = ctx.fillStyle as string;
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+          }
+        }
+      }
+    };
+
     map.forEach((row, z) => {
       row.forEach((tile, x) => {
         const xPos = x * TILE_SIZE;
         const zPos = z * TILE_SIZE;
         const key = `${x},${z}`;
 
-        // Floor
         const floorGeo = new THREE.PlaneGeometry(TILE_SIZE, TILE_SIZE);
-        const floor = new THREE.Mesh(floorGeo, floorMat);
-        floor.rotation.x = -Math.PI / 2;
-        floor.position.set(xPos, -2, zPos);
-        scene.add(floor);
+        
+        // Floor
+        if (tile !== TileType.SERVICE_TUNNEL) {
+          const floor = new THREE.Mesh(floorGeo, floorMat);
+          floor.rotation.x = -Math.PI / 2;
+          floor.position.set(xPos, -2, zPos);
+          scene.add(floor);
+        }
 
         // Ceiling
         const ceiling = new THREE.Mesh(floorGeo, ceilingMat);
@@ -659,11 +710,11 @@ export default function App() {
               // If neighbor is empty or a non-wall tile, place fixture on this face
               if (nz >= 0 && nz < map.length && nx >= 0 && nx < map[0].length) {
                 const nTile = map[nz][nx];
-                if (nTile === TileType.EMPTY || nTile === TileType.VENT || nTile === TileType.KEY) {
-                  if (tile === TileType.DISPLAY_WALL || tile === TileType.RADAR_WALL) {
+                if (nTile === TileType.EMPTY || nTile === TileType.VENT || nTile === TileType.KEY || nTile === TileType.SERVICE_TUNNEL) {
+                  if (tile === TileType.DISPLAY_WALL || tile === TileType.RADAR_WALL || tile === TileType.LAMP_WALL) {
                     const screenGeo = new THREE.PlaneGeometry(2, 2);
                     const screenMat = new THREE.MeshBasicMaterial({ 
-                      map: tile === TileType.DISPLAY_WALL ? displayTexture : radarTexture 
+                      map: tile === TileType.DISPLAY_WALL ? displayTexture : (tile === TileType.RADAR_WALL ? radarTexture : lampTexture)
                     });
                     const screenMesh = new THREE.Mesh(screenGeo, screenMat);
                     screenMesh.position.set(xPos + n.pos[0], 0.5, zPos + n.pos[2]);
@@ -671,7 +722,8 @@ export default function App() {
                     scene.add(screenMesh);
 
                     if (!lightAdded) {
-                      const pLight = new THREE.PointLight(tile === TileType.DISPLAY_WALL ? 0x00ff00 : 0x00ffff, 5, 10);
+                      const color = tile === TileType.DISPLAY_WALL ? 0x00ff00 : (tile === TileType.RADAR_WALL ? 0x00ffff : 0xffff00);
+                      const pLight = new THREE.PointLight(color, 5, 10);
                       pLight.position.set(xPos + n.pos[0] * 0.9, 0.5, zPos + n.pos[2] * 0.9);
                       scene.add(pLight);
                       lightsRef.current[key] = pLight;
@@ -710,7 +762,27 @@ export default function App() {
               const nx = x + n.dx;
               const nz = z + n.dz;
               if (nz >= 0 && nz < map.length && nx >= 0 && nx < map[0].length) {
-                if (map[nz][nx] === TileType.EMPTY) {
+                if (map[nz][nx] === TileType.EMPTY || map[nz][nx] === TileType.SERVICE_PATH_STRAIGHT || map[nz][nx] === TileType.SERVICE_PATH_JUNCTION) {
+                  mesh.rotation.y = n.rot;
+                  break;
+                }
+              }
+            }
+            break;
+          case TileType.VERTICALLY_SEGMENTED_WALL:
+            mesh = createVerticallySegmentedWallGeometry();
+            // Rotate to face empty space
+            const vNeighbors = [
+              { dx: 0, dz: 1, rot: 0 },
+              { dx: 0, dz: -1, rot: Math.PI },
+              { dx: 1, dz: 0, rot: Math.PI / 2 },
+              { dx: -1, dz: 0, rot: -Math.PI / 2 }
+            ];
+            for (const n of vNeighbors) {
+              const nx = x + n.dx;
+              const nz = z + n.dz;
+              if (nz >= 0 && nz < map.length && nx >= 0 && nx < map[0].length) {
+                if (map[nz][nx] === TileType.EMPTY || map[nz][nx] === TileType.SERVICE_PATH_STRAIGHT || map[nz][nx] === TileType.SERVICE_PATH_JUNCTION) {
                   mesh.rotation.y = n.rot;
                   break;
                 }
@@ -748,6 +820,19 @@ export default function App() {
                 }
               }
             }
+            break;
+          case TileType.SERVICE_TUNNEL:
+            mesh = createServiceTunnelGeometry();
+            const tunnelLight = new THREE.PointLight(0xffff00, 5, 5);
+            tunnelLight.position.set(xPos, -2, zPos);
+            scene.add(tunnelLight);
+            // Rotate to align with neighbors
+            if ((x > 0 && map[z][x-1] === TileType.SERVICE_TUNNEL) || (x < map[0].length - 1 && map[z][x+1] === TileType.SERVICE_TUNNEL)) {
+              mesh.rotation.y = Math.PI / 2;
+            }
+            break;
+          case TileType.LAMP_WALL:
+            mesh = createLampWallGeometry();
             break;
           case TileType.CEILING_LAMP:
             mesh = createCeilingLampGeometry();
@@ -829,8 +914,13 @@ export default function App() {
         camera.position.copy(currentPos.current);
         camera.rotation.y = currentRot.current;
 
-        // Apply backward offset (0.4 of a tile)
-        const backwardOffset = isMobileRef.current ? 2.2 : 1.6;
+        // Apply backward offset
+        const rpx = Math.round(logicalPos.current.x);
+        const rpz = Math.round(logicalPos.current.z);
+        const tile = map[rpz]?.[rpx];
+        const isServicePath = tile === TileType.SERVICE_PATH_STRAIGHT || tile === TileType.SERVICE_PATH_JUNCTION;
+        
+        const backwardOffset = isServicePath ? 0 : (isMobileRef.current ? 1.2 : 0.8);
         camera.position.x += Math.sin(currentRot.current) * backwardOffset;
         camera.position.z += Math.cos(currentRot.current) * backwardOffset;
 
@@ -927,20 +1017,22 @@ export default function App() {
       }
 
       // Update display animation (only if near a display wall to save performance)
-      const px = Math.round(logicalPos.current.x);
-      const pz = Math.round(logicalPos.current.z);
+      const dpx = Math.round(logicalPos.current.x);
+      const dpz = Math.round(logicalPos.current.z);
       let nearDisplay = false;
       let nearRadar = false;
+      let nearLamps = false;
 
       // Check 3x3 area around player for displays
       for (let dz = -3; dz <= 3; dz++) {
         for (let dx = -3; dx <= 3; dx++) {
-          const tx = px + dx;
-          const tz = pz + dz;
+          const tx = dpx + dx;
+          const tz = dpz + dz;
           if (tz >= 0 && tz < map.length && tx >= 0 && tx < map[0].length) {
             const tile = map[tz][tx];
             if (tile === TileType.DISPLAY_WALL) nearDisplay = true;
             if (tile === TileType.RADAR_WALL) nearRadar = true;
+            if (tile === TileType.LAMP_WALL) nearLamps = true;
           }
         }
       }
@@ -948,6 +1040,11 @@ export default function App() {
       if (displayCtxRef.current && nearDisplay) {
         draw(displayCtxRef.current, Date.now());
         displayTexture.needsUpdate = true;
+      }
+
+      if (lampCtxRef.current && nearLamps) {
+        drawLamps(lampCtxRef.current, Date.now());
+        lampTexture.needsUpdate = true;
       }
 
       // Update radar animation
@@ -967,6 +1064,8 @@ export default function App() {
         let targetIntensity = 0.4; // Medium (Room)
         if (tile === TileType.SERVICE_PATH_STRAIGHT || tile === TileType.SERVICE_PATH_JUNCTION) {
           targetIntensity = 0.01; // Dark (Pathway)
+        } else if (tile === TileType.SERVICE_TUNNEL) {
+          targetIntensity = 0.3; // Slightly brighter than service path due to yellow glow
         } else if (map.length > 9 && pz >= 1 && pz <= 2) { // Corridor in Level 2
           targetIntensity = 1.5; // Bright (Corridor)
         }

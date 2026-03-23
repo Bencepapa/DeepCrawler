@@ -242,3 +242,67 @@ export function createBulkheadDoorGeometry() {
   
   return group;
 }
+
+export function createVerticallySegmentedWallGeometry() {
+  const group = new THREE.Group();
+  const material = new THREE.MeshStandardMaterial({ color: 0x444444, metalness: 0.4, roughness: 0.6 });
+  
+  // 5 vertical segments
+  for (let i = 0; i < 5; i++) {
+    const geo = new THREE.BoxGeometry(0.7, 4, 0.5);
+    const mesh = new THREE.Mesh(geo, material);
+    mesh.position.x = -1.6 + i * 0.8;
+    // Alternate depth slightly
+    mesh.position.z = (i % 2 === 0) ? 0 : 0.1;
+    group.add(mesh);
+  }
+  
+  return group;
+}
+
+export function createLampWallGeometry() {
+  const group = new THREE.Group();
+  const material = new THREE.MeshStandardMaterial({ color: 0x333333 });
+  const base = new THREE.BoxGeometry(4, 4, 4);
+  const mesh = new THREE.Mesh(base, material);
+  group.add(mesh);
+  
+  // Add some vertical panels
+  for (let i = 0; i < 4; i++) {
+    const panelGeo = new THREE.BoxGeometry(0.1, 3.8, 4.1);
+    const panel = new THREE.Mesh(panelGeo, new THREE.MeshStandardMaterial({ color: 0x222222 }));
+    panel.position.x = -1.5 + i * 1;
+    group.add(panel);
+  }
+  
+  return group;
+}
+
+export function createServiceTunnelGeometry() {
+  const group = new THREE.Group();
+  const material = new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.6, roughness: 0.4 });
+  
+  // Floor of the tunnel (lower than normal floor)
+  const floor = new THREE.Mesh(new THREE.BoxGeometry(4, 0.2, 4), material);
+  floor.position.y = -2.5;
+  group.add(floor);
+  
+  // Walls of the tunnel
+  const leftWall = new THREE.Mesh(new THREE.BoxGeometry(0.2, 1, 4), material);
+  leftWall.position.set(-1.9, -2, 0);
+  group.add(leftWall);
+  
+  const rightWall = new THREE.Mesh(new THREE.BoxGeometry(0.2, 1, 4), material);
+  rightWall.position.set(1.9, -2, 0);
+  group.add(rightWall);
+  
+  // Grate on top (at normal floor level)
+  const grateMat = new THREE.MeshStandardMaterial({ color: 0x444444, transparent: true, opacity: 0.7 });
+  for (let i = 0; i < 8; i++) {
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(3.8, 0.1, 0.1), grateMat);
+    bar.position.set(0, -1.5, -1.75 + i * 0.5);
+    group.add(bar);
+  }
+  
+  return group;
+}
