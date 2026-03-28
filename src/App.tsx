@@ -118,6 +118,8 @@ export default function App() {
   const [currentLevelId, setCurrentLevelId] = useState(1);
   const [isDebugViewOpen, setIsDebugViewOpen] = useState(false);
   const isDebugViewOpenRef = useRef(false);
+  const [renderScale, setRenderScale] = useState(1);
+  const renderScaleRef = useRef(1);
   const [isLightmapActive, setIsLightmapActive] = useState(LEVELS[1].lightmapEnabled);
   const isLightmapActiveRef = useRef(LEVELS[1].lightmapEnabled);
   const [hasKey, setHasKey] = useState(false);
@@ -158,6 +160,23 @@ export default function App() {
   useEffect(() => {
     isDebugViewOpenRef.current = isDebugViewOpen;
   }, [isDebugViewOpen]);
+
+  useEffect(() => {
+    renderScaleRef.current = renderScale;
+    if (rendererRef.current && cameraRef.current) {
+      const width = window.innerWidth / renderScale;
+      const height = window.innerHeight / renderScale;
+      rendererRef.current.setSize(width, height, false);
+      cameraRef.current.aspect = width / height;
+      cameraRef.current.updateProjectionMatrix();
+      
+      // Update canvas style for sharp upscaling
+      const canvas = rendererRef.current.domElement;
+      canvas.style.width = '100%';
+      canvas.style.height = '100%';
+      canvas.style.imageRendering = renderScale > 1 ? 'pixelated' : 'auto';
+    }
+  }, [renderScale]);
 
   // Movement state
   const targetPos = useRef(new THREE.Vector3(5 * TILE_SIZE, 0, 5 * TILE_SIZE));
@@ -522,10 +541,18 @@ export default function App() {
     const camera = new THREE.PerspectiveCamera(isMobileRef.current ? 85 : 75, window.innerWidth / window.innerHeight, 0.1, 1000);
     cameraRef.current = camera;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(window.devicePixelRatio);
-    containerRef.current.appendChild(renderer.domElement);
+    const renderer = new THREE.WebGLRenderer({ antialias: renderScaleRef.current === 1 });
+    const width = window.innerWidth / renderScaleRef.current;
+    const height = window.innerHeight / renderScaleRef.current;
+    renderer.setSize(width, height, false);
+    renderer.setPixelRatio(1); // Use 1 to ensure we control resolution via setSize
+    
+    const canvas = renderer.domElement;
+    canvas.style.width = '100%';
+    canvas.style.height = '100%';
+    canvas.style.imageRendering = renderScaleRef.current > 1 ? 'pixelated' : 'auto';
+    
+    containerRef.current.appendChild(canvas);
     rendererRef.current = renderer;
 
     // Lights
@@ -1743,9 +1770,11 @@ export default function App() {
 
     const handleResize = () => {
       if (!cameraRef.current || !rendererRef.current) return;
-      cameraRef.current.aspect = window.innerWidth / window.innerHeight;
+      const width = window.innerWidth / renderScaleRef.current;
+      const height = window.innerHeight / renderScaleRef.current;
+      cameraRef.current.aspect = width / height;
       cameraRef.current.updateProjectionMatrix();
-      rendererRef.current.setSize(window.innerWidth, window.innerHeight);
+      rendererRef.current.setSize(width, height, false);
     };
 
     window.addEventListener('resize', handleResize);
@@ -1911,22 +1940,36 @@ export default function App() {
       </AnimatePresence>
 
       {/* Mobile Debug Buttons */}
-      {isMobile && (
-        <div className="absolute top-4 left-0 w-full px-4 flex justify-between pointer-events-none z-50">
-          <button 
-            onPointerDown={(e) => { e.preventDefault(); setIsDebugViewOpen(prev => !prev); }}
-            className="pointer-events-auto bg-black/60 border border-emerald-500/30 px-3 py-1 rounded text-[10px] text-emerald-500/70 active:bg-emerald-500/20 touch-none select-none"
-          >
-            DEBUG
-          </button>
-          <button 
-            onPointerDown={(e) => { e.preventDefault(); setIsLightmapActive(prev => !prev); }}
-            className="pointer-events-auto bg-black/60 border border-emerald-500/30 px-3 py-1 rounded text-[10px] text-emerald-500/70 active:bg-emerald-500/20 touch-none select-none"
-          >
-            LIGHTMAP
-          </button>
+      <div className="absolute top-4 right-4 flex flex-col gap-2 z-50 pointer-events-none">
+        <div className="flex gap-2 justify-end">
+          {[1, 2, 4, 8].map(scale => (
+            <button
+              key={scale}
+              onPointerDown={(e) => { e.preventDefault(); setRenderScale(scale); }}
+              className={`pointer-events-auto w-8 h-8 flex items-center justify-center rounded border text-[10px] font-bold transition-colors ${renderScale === scale ? 'bg-emerald-500 text-black border-emerald-400' : 'bg-black/60 text-emerald-500/70 border-emerald-500/30 active:bg-emerald-500/20'}`}
+            >
+              {scale}x
+            </button>
+          ))}
         </div>
-      )}
+        
+        {isMobile && (
+          <div className="flex justify-end gap-2">
+            <button 
+              onPointerDown={(e) => { e.preventDefault(); setIsDebugViewOpen(prev => !prev); }}
+              className="pointer-events-auto bg-black/60 border border-emerald-500/30 px-3 py-1 rounded text-[10px] text-emerald-500/70 active:bg-emerald-500/20 touch-none select-none"
+            >
+              DEBUG
+            </button>
+            <button 
+              onPointerDown={(e) => { e.preventDefault(); setIsLightmapActive(prev => !prev); }}
+              className="pointer-events-auto bg-black/60 border border-emerald-500/30 px-3 py-1 rounded text-[10px] text-emerald-500/70 active:bg-emerald-500/20 touch-none select-none"
+            >
+              LIGHTMAP
+            </button>
+          </div>
+        )}
+      </div>
 
       {/* HUD */}
       <div className="absolute top-0 left-0 w-full p-4 pointer-events-none flex justify-between items-start">

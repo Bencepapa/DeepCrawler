@@ -91,7 +91,8 @@ export const LEVELS: Record<number, LevelConfig> = {
     name: "DECK 2: NEON DISTRICT",
     map: LEVEL_3_MAP,
     lightmapEnabled: true,
-    defaultAmbient: '#020205',
+    defaultAmbient: '#000000',
+    //defaultAmbient: '#020205',
   }
 };
 

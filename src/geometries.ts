@@ -316,7 +316,7 @@ export function createNeonTubeGeometry(color: number) {
   const material = new THREE.MeshStandardMaterial({ color: 0x333333 });
   const neonMat = new THREE.MeshStandardMaterial({ 
     color: 0xffffff, //color, 
-    emissive: color, 
+    emissive: 0xffffff, 
     emissiveIntensity: 15 
   });
   
@@ -337,10 +337,10 @@ export function createNeonTubeGeometry(color: number) {
 
 export function createNeonCornerWallGeometry() {
   const group = new THREE.Group();
-  const wallMat = new THREE.MeshStandardMaterial({ color: 0x333333, metalness: 0.8, roughness: 0.2 });
+  const wallMat = new THREE.MeshStandardMaterial({ color: 0x333333 }); //, metalness: 0.8, roughness: 0.2 });
   const neonMat = new THREE.MeshStandardMaterial({ 
-    color: 0x00ffff, 
-    emissive: 0x00ffff, 
+    color: 0xffffff, 
+    emissive: 0xffffff, 
     emissiveIntensity: 20 
   });
   
