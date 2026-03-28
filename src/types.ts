@@ -22,6 +22,11 @@ export enum TileType {
   VERTICALLY_SEGMENTED_WALL = 20,
   LAMP_WALL = 21,
   SERVICE_TUNNEL = 22,
+  NEON_TUBE_CYAN = 23,
+  NEON_TUBE_PURPLE = 24,
+  NEON_TUBE_PINK = 25,
+  NEON_TUBE_WHITE = 26,
+  NEON_CORNER_WALL = 27,
 }
 
 export enum Direction {
@@ -53,4 +58,16 @@ export interface MapTile {
   interactive?: boolean;
   onUse?: () => void;
   metadata?: any;
+}
+
+export interface ObstacleProperties {
+  shadowCasting: boolean;
+  shadowRadius?: number; // 0 to 0.5, where 0.5 is full tile
+  canJumpOver: boolean;
+  canShootOver: boolean;
+  destroyable: boolean;
+  openable: boolean;
+  walkable: boolean;
+  lightRadius?: number;
+  lightIntensity?: number;
 }

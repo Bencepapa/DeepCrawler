@@ -12,7 +12,9 @@ import {
   ROTATE_SPEED, 
   INITIAL_STATS, 
   MAP_DATA,
-  LEVEL_2_MAP
+  LEVEL_2_MAP,
+  LEVELS,
+  TILE_PROPERTIES
 } from './constants';
 import { 
   createPillarGeometry, 
@@ -30,7 +32,11 @@ import {
   createBulkheadDoorGeometry,
   createVerticallySegmentedWallGeometry,
   createLampWallGeometry,
-  createServiceTunnelGeometry
+  createServiceTunnelGeometry,
+  createNeonTubeGeometry,
+  createNeonCornerWallGeometry,
+  createVaporwaveFloorGeometry,
+  createGlowPlane
 } from './geometries';
 import { 
   Enemy, 
@@ -72,13 +78,21 @@ export default function App() {
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const playerRef = useRef<THREE.Group | null>(null);
-  const lightsRef = useRef<Record<string, THREE.PointLight>>({});
+  const lightsRef = useRef<Array<{ light: THREE.PointLight; x: number; z: number; tile: TileType; radius?: number; intensity?: number }>>([]);
+  const lightOverrides = useRef<Record<string, { radius?: number; intensity?: number }>>({});
   const ambientLightRef = useRef<THREE.AmbientLight | null>(null);
   const fogRef = useRef<THREE.Fog | null>(null);
   const displayCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const displayCtxRef = useRef<CanvasRenderingContext2D | null>(null);
   const radarCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const radarCtxRef = useRef<CanvasRenderingContext2D | null>(null);
+  const lampCtxRef = useRef<CanvasRenderingContext2D | null>(null);
+  const lightMapCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const lightMapCtxRef = useRef<CanvasRenderingContext2D | null>(null);
+  const tempLightCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const tempLightCtxRef = useRef<CanvasRenderingContext2D | null>(null);
+  const debugCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const debugCtxRef = useRef<CanvasRenderingContext2D | null>(null);
   
   const [gameState, setGameState] = useState<GameState>({
     playerPos: { x: 5, z: 5 },
@@ -86,6 +100,10 @@ export default function App() {
     stats: INITIAL_STATS,
     isDefending: false,
   });
+
+  const [levelName, setLevelName] = useState("SUB-DECK 4: MAINTENANCE");
+  const [isTransitioning, setIsTransitioning] = useState(false);
+  const [transitionLevelName, setTransitionLevelName] = useState("");
 
   const [enemies, setEnemies] = useState<Enemy[]>([]);
   const enemiesRef = useRef<Enemy[]>([]);
@@ -97,9 +115,15 @@ export default function App() {
   const isMobileRef = useRef(false);
   const [envEffect, setEnvEffect] = useState<'none' | 'water' | 'vacuum'>('none');
   const [map, setMap] = useState(MAP_DATA);
+  const [currentLevelId, setCurrentLevelId] = useState(1);
+  const [isDebugViewOpen, setIsDebugViewOpen] = useState(false);
+  const isDebugViewOpenRef = useRef(false);
+  const [isLightmapActive, setIsLightmapActive] = useState(LEVELS[1].lightmapEnabled);
+  const isLightmapActiveRef = useRef(LEVELS[1].lightmapEnabled);
   const [hasKey, setHasKey] = useState(false);
   const [overclockedTiles, setOverclockedTiles] = useState<Set<string>>(new Set());
   const overclockedTilesRef = useRef<Set<string>>(new Set());
+  const frameCounterRef = useRef(0);
 
   const isDefendingRef = useRef(false);
   const isAttackingRef = useRef(false);
@@ -127,6 +151,14 @@ export default function App() {
     overclockedTilesRef.current = overclockedTiles;
   }, [overclockedTiles]);
 
+  useEffect(() => {
+    isLightmapActiveRef.current = isLightmapActive;
+  }, [isLightmapActive]);
+
+  useEffect(() => {
+    isDebugViewOpenRef.current = isDebugViewOpen;
+  }, [isDebugViewOpen]);
+
   // Movement state
   const targetPos = useRef(new THREE.Vector3(5 * TILE_SIZE, 0, 5 * TILE_SIZE));
   const targetRot = useRef(-Math.PI / 2); // Facing EAST
@@ -150,19 +182,20 @@ export default function App() {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  const showMessage = (msg: string) => {
+  const showMessage = useCallback((msg: string) => {
     setMessage(msg);
     setTimeout(() => setMessage(null), 2000);
-  };
+  }, []);
 
   const checkCollision = useCallback((x: number, z: number) => {
     if (x < 0 || x >= map[0].length || z < 0 || z >= map.length) return true;
     const tile = map[z][x];
-    return tile === TileType.WALL || tile === TileType.PILLAR || tile === TileType.ANGLED_WALL || tile === TileType.WINDOW_WALL || tile === TileType.DOOR || tile === TileType.BOX || tile === TileType.DISPLAY_WALL || tile === TileType.LIGHT_BOTTOM || tile === TileType.LIGHT_MIDDLE || tile === TileType.RADAR_WALL || tile === TileType.SEGMENTED_WALL || tile === TileType.BULKHEAD_DOOR || tile === TileType.VERTICALLY_SEGMENTED_WALL || tile === TileType.LAMP_WALL;
+    const props = TILE_PROPERTIES[tile];
+    return props ? !props.walkable : true;
   }, [map]);
 
   const move = useCallback((forward: boolean) => {
-    if (isGameOver) return;
+    if (isGameOver || isTransitioning) return;
     console.log('Move requested:', forward ? 'forward' : 'backward');
     
     let dx = 0;
@@ -184,10 +217,10 @@ export default function App() {
     console.log(`Current: (${logicalPos.current.x}, ${logicalPos.current.z}), Target: (${nextX}, ${nextZ})`);
 
     const targetTile = map[nextZ]?.[nextX];
-    const isBox = targetTile === TileType.BOX;
+    const props = TILE_PROPERTIES[targetTile];
 
-    if (isBox) {
-      // Jump over box: move 2 tiles forward
+    if (props?.canJumpOver && !props?.walkable) {
+      // Jump over obstacle: move 2 tiles forward
       const jumpX = logicalPos.current.x + dx * 2;
       const jumpZ = logicalPos.current.z + dz * 2;
       
@@ -195,7 +228,7 @@ export default function App() {
         logicalPos.current = { x: jumpX, z: jumpZ };
         targetPos.current.set(jumpX * TILE_SIZE, 0, jumpZ * TILE_SIZE);
         setGameState(prev => ({ ...prev, playerPos: { x: jumpX, z: jumpZ } }));
-        showMessage("JUMPED OVER BOX");
+        showMessage(`JUMPED OVER ${TILE_DESCRIPTIONS[targetTile] || "OBSTACLE"}`);
         return;
       }
     }
@@ -213,16 +246,17 @@ export default function App() {
         showMessage("KEYCARD ACQUIRED");
       }
 
-      const isBarricade = map[nextZ][nextX] === TileType.BARRICADE;
-      targetPos.current.set(nextX * TILE_SIZE, isBarricade ? 0.5 : 0, nextZ * TILE_SIZE);
+      const props = TILE_PROPERTIES[map[nextZ][nextX]];
+      const isLowObstacle = props?.canJumpOver;
+      targetPos.current.set(nextX * TILE_SIZE, isLowObstacle ? 0.5 : 0, nextZ * TILE_SIZE);
       setGameState(prev => ({ ...prev, playerPos: { x: nextX, z: nextZ } }));
     } else {
       console.log('Collision detected at:', nextX, nextZ);
     }
-  }, [checkCollision, isGameOver]);
+  }, [checkCollision, isGameOver, isTransitioning, map, showMessage]);
 
   const rotate = useCallback((clockwise: boolean) => {
-    if (isGameOver) return;
+    if (isGameOver || isTransitioning) return;
     console.log('Rotate requested:', clockwise ? 'clockwise' : 'counter-clockwise');
     
     const nextDir = clockwise ? (logicalDir.current + 1) % 4 : (logicalDir.current + 3) % 4;
@@ -232,10 +266,10 @@ export default function App() {
     targetRot.current += clockwise ? -Math.PI / 2 : Math.PI / 2;
     
     setGameState(prev => ({ ...prev, playerDir: nextDir }));
-  }, [isGameOver]);
+  }, [isGameOver, isTransitioning]);
 
   const strafe = useCallback((right: boolean) => {
-    if (isGameOver) return;
+    if (isGameOver || isTransitioning) return;
     
     let dx = 0;
     let dz = 0;
@@ -261,14 +295,15 @@ export default function App() {
         showMessage("KEYCARD ACQUIRED");
       }
 
-      const isBarricade = map[nextZ][nextX] === TileType.BARRICADE;
-      targetPos.current.set(nextX * TILE_SIZE, isBarricade ? 0.5 : 0, nextZ * TILE_SIZE);
+      const props = TILE_PROPERTIES[map[nextZ][nextX]];
+      const isLowObstacle = props?.canJumpOver;
+      targetPos.current.set(nextX * TILE_SIZE, isLowObstacle ? 0.5 : 0, nextZ * TILE_SIZE);
       setGameState(prev => ({ ...prev, playerPos: { x: nextX, z: nextZ } }));
     }
-  }, [checkCollision, isGameOver]);
+  }, [checkCollision, isGameOver, isTransitioning, map, showMessage]);
 
   const interact = useCallback(() => {
-    if (isGameOver) return;
+    if (isGameOver || isTransitioning) return;
     const { x: px, z: pz } = logicalPos.current;
     const dir = logicalDir.current;
     let tx = px;
@@ -280,17 +315,50 @@ export default function App() {
     else if (dir === Direction.WEST) tx -= 1;
     
     const tile = map[tz]?.[tx];
-    if (tile === TileType.DOOR) {
-      if (hasKey) {
-        const newMap = [...map];
-        newMap[tz] = [...newMap[tz]];
-        newMap[tz][tx] = TileType.EMPTY;
-        setMap(newMap);
-        showMessage("DOOR UNLOCKED");
-      } else {
-        showMessage("Door is locked. Need keycard.");
+    const props = TILE_PROPERTIES[tile];
+
+    if (props?.openable) {
+      if (tile === TileType.DOOR) {
+        if (hasKey) {
+          const newMap = [...map];
+          newMap[tz] = [...newMap[tz]];
+          newMap[tz][tx] = TileType.EMPTY;
+          setMap(newMap);
+          showMessage("DOOR UNLOCKED");
+        } else {
+          showMessage("Door is locked. Need keycard.");
+        }
+      } else if (tile === TileType.BULKHEAD_DOOR) {
+        const nextLevelId = currentLevelId === 1 ? 2 : 3;
+        setTransitionLevelName(LEVELS[nextLevelId].name);
+        setIsTransitioning(true);
+        
+        setTimeout(() => {
+          // Reset player state for new level
+          logicalPos.current = { x: 1, z: 1 };
+          logicalDir.current = Direction.EAST;
+          targetRot.current = -Math.PI / 2;
+          currentRot.current = -Math.PI / 2;
+          currentPos.current.set(1 * TILE_SIZE, 0, 1 * TILE_SIZE);
+          targetPos.current.set(1 * TILE_SIZE, 0, 1 * TILE_SIZE);
+          
+          setCurrentLevelId(nextLevelId);
+          setMap(LEVELS[nextLevelId].map);
+          setIsLightmapActive(LEVELS[nextLevelId].lightmapEnabled);
+          setLevelName(LEVELS[nextLevelId].name);
+          setEnemies([]);
+          setGameState(prev => ({ 
+            ...prev, 
+            playerPos: { x: 1, z: 1 },
+            playerDir: Direction.EAST
+          }));
+          
+          setTimeout(() => {
+            setIsTransitioning(false);
+          }, 1500);
+        }, 2000);
       }
-    } else if (tile === TileType.VENT) {
+    } else if (tile === TileType.VENT && props?.destroyable) {
       if (Math.random() > 0.5) {
         setEnvEffect('vacuum');
         showMessage("CRITICAL: HULL BREACH DETECTED!");
@@ -298,20 +366,12 @@ export default function App() {
       } else {
         showMessage("Vent is sealed tight.");
       }
-    } else if (tile === TileType.OBSTACLE) {
-      showMessage("A heavy crate. Good for cover.");
+    } else if (props?.canJumpOver) {
+      showMessage(TILE_DESCRIPTIONS[tile] || "A low obstacle. You can jump over it.");
     } else if (tile === TileType.WINDOW_WALL) {
       setEnvEffect('water');
       showMessage("Observing the deep ocean...");
       setTimeout(() => setEnvEffect('none'), 5000);
-    } else if (tile === TileType.BULKHEAD_DOOR) {
-      showMessage("TRANSITIONING TO NEXT LEVEL...");
-      setTimeout(() => {
-        setMap(LEVEL_2_MAP);
-        logicalPos.current = { x: 1, z: 1 };
-        targetPos.current.set(1 * TILE_SIZE, 0, 1 * TILE_SIZE);
-        setGameState(prev => ({ ...prev, playerPos: { x: 1, z: 1 } }));
-      }, 1000);
     } else if (tile === TileType.LIGHT_MIDDLE || tile === TileType.LIGHT_BOTTOM || tile === TileType.CEILING_LAMP) {
       const key = `${tx},${tz}`;
       setOverclockedTiles(prev => {
@@ -330,10 +390,10 @@ export default function App() {
     } else {
       showMessage("Nothing to interact with.");
     }
-  }, [isGameOver, hasKey]);
+  }, [isGameOver, isTransitioning, hasKey, map, showMessage]);
 
   const attack = useCallback(() => {
-    if (isGameOver) return;
+    if (isGameOver || isTransitioning) return;
     
     // Spawn projectile
     const projId = Math.random().toString(36).substr(2, 9);
@@ -394,7 +454,7 @@ export default function App() {
       }
       return prev;
     });
-  }, [gameState.stats.firearm, isGameOver]);
+  }, [gameState.stats.firearm, isGameOver, isTransitioning]);
 
   const toggleDefense = useCallback(() => {
     setGameState(prev => ({ ...prev, isDefending: !prev.isDefending }));
@@ -402,17 +462,25 @@ export default function App() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.repeat || isGameOver) return;
+      if (e.repeat || isGameOver || isTransitioning) return;
+      if (e.key === 'F10') {
+        if (e.shiftKey) {
+          setIsLightmapActive(prev => !prev);
+        } else {
+          setIsDebugViewOpen(prev => !prev);
+        }
+        return;
+      }
       switch (e.key.toLowerCase()) {
         case 'w': case 'arrowup': move(true); break;
         case 's': case 'arrowdown': move(false); break;
         case 'a': strafe(false); break;
         case 'd': strafe(true); break;
-        case 'q': rotate(false); break;
-        case 'e': rotate(true); break;
-        case 'f': interact(); break;
+        case 'q': case 'arrowleft': rotate(false); break;
+        case 'e': case 'arrowright': rotate(true); break;
+        case ' ': interact(); break;
+        case 'f': attack(); break;
         case 'r': attack(); break;
-        case ' ': attack(); break;
         case 'shift': toggleDefense(); break;
       }
     };
@@ -427,7 +495,7 @@ export default function App() {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [isGameOver, move, rotate, interact, attack, toggleDefense]);
+  }, [isGameOver, isTransitioning, move, rotate, interact, attack, toggleDefense]);
 
   // Three.js Setup
   useEffect(() => {
@@ -438,6 +506,12 @@ export default function App() {
       containerRef.current.removeChild(containerRef.current.firstChild);
     }
 
+    // Clear previous state
+    lightsRef.current = [];
+    enemiesRef.current = [];
+    projectilesRef.current = [];
+    overclockedTilesRef.current = new Set();
+
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x050505);
     const fog = new THREE.Fog(0x050505, 2, 15);
@@ -445,7 +519,7 @@ export default function App() {
     fogRef.current = fog;
     sceneRef.current = scene;
 
-    const camera = new THREE.PerspectiveCamera(isMobileRef.current ? 105 : 95, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const camera = new THREE.PerspectiveCamera(isMobileRef.current ? 85 : 75, window.innerWidth / window.innerHeight, 0.1, 1000);
     cameraRef.current = camera;
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -483,15 +557,77 @@ export default function App() {
     flashlight.position.set(0, 0.5, 0);
     playerGroup.add(flashlight);
 
+    // Setup lightmap canvas
+    const lightMapCanvas = document.createElement('canvas');
+    const mapWidth = map[0].length;
+    const mapHeight = map.length;
+    lightMapCanvas.width = mapWidth * 16;
+    lightMapCanvas.height = mapHeight * 16;
+    const lightMapCtx = lightMapCanvas.getContext('2d');
+    lightMapCanvasRef.current = lightMapCanvas;
+    lightMapCtxRef.current = lightMapCtx;
+
+    const tempLightCanvas = document.createElement('canvas');
+    tempLightCanvas.width = mapWidth * 16;
+    tempLightCanvas.height = mapHeight * 16;
+    tempLightCanvasRef.current = tempLightCanvas;
+    tempLightCtxRef.current = tempLightCanvas.getContext('2d');
+
+    const lightMapTexture = new THREE.CanvasTexture(lightMapCanvas);
+    lightMapTexture.minFilter = THREE.LinearFilter;
+    lightMapTexture.magFilter = THREE.LinearFilter;
+    lightMapTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+
     // Map Generation
-    const wallMat = new THREE.MeshStandardMaterial({ color: 0x888888, metalness: 0.2, roughness: 0.8 });
+    const wallMat = new THREE.MeshStandardMaterial({ 
+      color: 0x888888, 
+      metalness: 0.2, 
+      roughness: 0.8
+    });
+
+    const projectUVs = (obj: THREE.Object3D) => {
+      obj.updateMatrixWorld(true);
+      obj.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          // Skip fixtures - they have their own emissive logic
+          if (child.name && (child.name.includes('fixture') || child.name.includes('light'))) return;
+
+          const mat = child.material;
+          if (mat instanceof THREE.MeshStandardMaterial) {
+            mat.emissiveMap = lightMapTexture;
+            mat.emissive = new THREE.Color(0xffffff);
+            const isGlass = mat instanceof THREE.MeshPhysicalMaterial && mat.transparent;
+            mat.emissiveIntensity = isGlass ? 0.3 : 1.5;
+          }
+
+          const geo = child.geometry;
+          if (geo.attributes.position && geo.attributes.uv) {
+            const pos = geo.attributes.position;
+            const uv = geo.attributes.uv;
+            const v3 = new THREE.Vector3();
+            for (let i = 0; i < uv.count; i++) {
+              v3.set(pos.getX(i), pos.getY(i), pos.getZ(i));
+              child.localToWorld(v3);
+              
+              // Project world XZ to UV [0, 1]
+              // The map starts at -TILE_SIZE/2 in world space
+              const u = (v3.x + TILE_SIZE / 2) / (map[0].length * TILE_SIZE);
+              // Flip V to match Canvas top-down coordinate system with flipY: true
+              const v = 1 - (v3.z + TILE_SIZE / 2) / (map.length * TILE_SIZE);
+              uv.setXY(i, u, v);
+            }
+            uv.needsUpdate = true;
+          }
+        }
+      });
+    };
     const floorMat = new THREE.MeshStandardMaterial({ color: 0x444444, roughness: 0.9 });
     const ceilingMat = new THREE.MeshStandardMaterial({ color: 0x333333 });
 
     // Fog adjustment
     scene.fog = new THREE.Fog(0x050505, 5, 50);
 
-    lightsRef.current = {};
+    lightsRef.current = [];
 
     // Setup display canvas
     const displayCanvas = document.createElement('canvas');
@@ -516,8 +652,28 @@ export default function App() {
     lampCanvas.width = 256;
     lampCanvas.height = 256;
     const lampCtx = lampCanvas.getContext('2d');
+    lampCtxRef.current = lampCtx;
     const lampTexture = new THREE.CanvasTexture(lampCanvas);
-    const lampCtxRef = { current: lampCtx };
+    lampTexture.minFilter = THREE.NearestFilter;
+    lampTexture.magFilter = THREE.NearestFilter;
+
+    // Create a single large floor plane for baked lighting
+    if (currentLevelId !== 3) {
+      const floorGeo = new THREE.PlaneGeometry(map[0].length * TILE_SIZE, map.length * TILE_SIZE, 32, 32);
+      const bakedFloorMat = new THREE.MeshStandardMaterial({ 
+        color: 0x222222,
+        roughness: 0.8,
+        metalness: 0.2,
+        emissive: 0xffffff,
+        emissiveIntensity: 1.5,
+        emissiveMap: lightMapTexture
+      });
+      const floorMesh = new THREE.Mesh(floorGeo, bakedFloorMat);
+      floorMesh.rotation.x = -Math.PI / 2;
+      floorMesh.position.set((map[0].length * TILE_SIZE) / 2 - TILE_SIZE / 2, -2.01, (map.length * TILE_SIZE) / 2 - TILE_SIZE / 2);
+      projectUVs(floorMesh);
+      scene.add(floorMesh);
+    }
 
     // Display animation setup
     const setup = (ctx: CanvasRenderingContext2D) => {
@@ -530,12 +686,12 @@ export default function App() {
       ctx.fillStyle = '#000';
       ctx.fillRect(0, 0, 256, 256);
       ctx.strokeStyle = '#0f0';
-      ctx.lineWidth = 2;
+      ctx.lineWidth = 15;
       
       // Draw some "diagnostics"
       ctx.beginPath();
       for (let i = 0; i < 10; i++) {
-        const y = 50 + i * 20;
+        const y = 50 + i * 19;
         const x = 20 + Math.sin(time * 0.005 + i) * 10;
         ctx.moveTo(20, y);
         ctx.lineTo(200 + x, y);
@@ -558,11 +714,13 @@ export default function App() {
       const scaleY = 256 / mapH;
       
       // Draw map outline
+      ctx.fillStyle = '#000f00';
       ctx.strokeStyle = '#0f0';
       ctx.lineWidth = 1;
       map.forEach((row, z) => {
         row.forEach((tile, x) => {
           if (tile !== TileType.EMPTY && tile !== TileType.VENT && tile !== TileType.KEY && tile !== TileType.SERVICE_TUNNEL) {
+            ctx.fillRect(x * scaleX, z * scaleY, scaleX, scaleY);
             ctx.strokeRect(x * scaleX, z * scaleY, scaleX, scaleY);
           }
         });
@@ -583,42 +741,215 @@ export default function App() {
       ctx.fill();
     };
 
-    const drawLamps = (ctx: CanvasRenderingContext2D, time: number) => {
-      ctx.fillStyle = '#111';
+    const drawLamps = (ctx: CanvasRenderingContext2D, time: number, lod: number = 1) => {
+      ctx.fillStyle = '#050505';
       ctx.fillRect(0, 0, 256, 256);
       
-      const rows = 8;
-      const cols = 8;
-      const spacing = 256 / 8;
+      if (lod >= 4) return;
+
+      const rows = lod === 1 ? 8 : (lod === 2 ? 4 : 2);
+      const cols = lod === 1 ? 8 : (lod === 2 ? 4 : 2);
+      const spacing = 256 / rows;
+      const radius = lod === 1 ? 8 : (lod === 2 ? 16 : 32);
       
       for (let r = 0; r < rows; r++) {
         for (let c = 0; c < cols; c++) {
           const seed = r * cols + c;
           const blink = Math.sin(time * 0.005 + seed * 1.5) > 0.5;
           
+          ctx.beginPath();
+          const x = c * spacing + spacing/2;
+          const y = r * spacing + spacing/2;
+          ctx.arc(x, y, radius, 0, Math.PI * 2);
+          
           if (blink) {
             const colorSeed = (seed + Math.floor(time * 0.001)) % 3;
-            if (colorSeed === 0) ctx.fillStyle = '#ff0000';
-            else if (colorSeed === 1) ctx.fillStyle = '#00ff00';
-            else ctx.fillStyle = '#ffff00';
-          } else {
-            ctx.fillStyle = '#222';
-          }
-          
-          ctx.beginPath();
-          ctx.arc(c * spacing + spacing/2, r * spacing + spacing/2, 8, 0, Math.PI * 2);
-          ctx.fill();
-          
-          // Add a small glow
-          if (blink) {
-            ctx.shadowBlur = 10;
-            ctx.shadowColor = ctx.fillStyle as string;
-            ctx.stroke();
+            let color = '#ff0000';
+            if (colorSeed === 1) color = '#00ff00';
+            else if (colorSeed === 2) color = '#ffff00';
+            
+            ctx.fillStyle = color;
+            if (lod === 1) {
+              ctx.shadowBlur = 15;
+              ctx.shadowColor = color;
+            }
+            ctx.fill();
             ctx.shadowBlur = 0;
+          } else {
+            ctx.fillStyle = '#111';
+            ctx.fill();
           }
         }
       }
     };
+
+    const updateLightMap = (ctx: CanvasRenderingContext2D, map: number[][], lights: Array<{ light: THREE.PointLight; x: number; z: number; tile: TileType; radius?: number; intensity?: number }>) => {
+      const rows = map.length;
+      const cols = map[0].length;
+      const tileSize = 16;
+      const width = cols * tileSize;
+      const height = rows * tileSize;
+      
+      if (!isLightmapActiveRef.current) {
+        ctx.fillStyle = '#050505';
+        ctx.fillRect(0, 0, width, height);
+        return;
+      }
+      
+      const level = LEVELS[currentLevelId];
+      const defaultAmbient = level?.defaultAmbient || '#050505';
+      
+      // Draw base ambient per tile/sector
+      for (let z = 0; z < rows; z++) {
+        for (let x = 0; x < cols; x++) {
+          let ambientColor = defaultAmbient;
+          if (level?.sectors) {
+            for (const sector of level.sectors) {
+              if (x >= sector.x1 && x <= sector.x2 && z >= sector.z1 && z <= sector.z2) {
+                ambientColor = sector.ambientColor;
+                break;
+              }
+            }
+          }
+          ctx.fillStyle = ambientColor;
+          ctx.fillRect(x * tileSize, z * tileSize, tileSize, tileSize);
+        }
+      }
+      
+      const tempCtx = tempLightCtxRef.current;
+      const tempCanvas = tempLightCanvasRef.current;
+      if (!tempCtx || !tempCanvas) return;
+
+      // Draw light glows
+      lights.forEach(({ light, x: kx, z: kz, tile: kTile, radius: rOverride, intensity: iOverride }) => {
+        if (light.intensity <= 0) return;
+        
+        // Clear temp canvas for this light
+        tempCtx.clearRect(0, 0, width, height);
+
+        const props = TILE_PROPERTIES[kTile];
+        const intensity = (iOverride ?? props?.lightIntensity ?? light.intensity) / 32;
+        const color = light.color;
+        
+        // Map world position to lightmap coordinates for precise placement
+        const lx = (light.position.x / TILE_SIZE + 0.5) * tileSize;
+        const lz = (light.position.z / TILE_SIZE + 0.5) * tileSize;
+        
+        const radius = (rOverride ?? props?.lightRadius ?? 7) * tileSize;
+        
+        // Draw glow on temp canvas
+        tempCtx.globalCompositeOperation = 'source-over';
+        const grad = tempCtx.createRadialGradient(lx, lz, 0, lx, lz, radius);
+        grad.addColorStop(0, `rgba(${Math.floor(color.r * 255)}, ${Math.floor(color.g * 255)}, ${Math.floor(color.b * 255)}, ${intensity})`);
+        grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        
+        tempCtx.fillStyle = grad;
+        tempCtx.fillRect(lx - radius, lz - radius, radius * 2, radius * 2);
+
+        // Draw shadows for this light on temp canvas
+        // Only check tiles within a reasonable range of the light to improve performance
+        const checkRadius = Math.ceil(radius / tileSize) + 1;
+        const startX = Math.max(0, kx - checkRadius);
+        const endX = Math.min(cols - 1, kx + checkRadius);
+        const startZ = Math.max(0, kz - checkRadius);
+        const endZ = Math.min(rows - 1, kz + checkRadius);
+
+        for (let z = startZ; z <= endZ; z++) {
+          for (let x = startX; x <= endX; x++) {
+            const tile = map[z][x];
+            const props = TILE_PROPERTIES[tile];
+            
+            if (props?.shadowCasting) {
+              // Don't cast shadow for the tile that contains the light source
+              if (x === kx && z === kz) continue;
+
+              const tw = tileSize;
+              const th = tileSize;
+              const cx = x * tw + tw / 2;
+              const cz = z * th + th / 2;
+              const dx = cx - lx;
+              const dz = cz - lz;
+              const dist = Math.sqrt(dx * dx + dz * dz);
+              
+              // Don't cast shadow if light is inside or on the tile
+              if (dist < tileSize * 0.4) continue;
+
+              // Perspective Shadow Projection
+              // Use shadowRadius from TILE_PROPERTIES
+              const shadowRadius = (props.shadowRadius || 0.5) * tw;
+              const x0 = cx - shadowRadius;
+              const z0 = cz - shadowRadius;
+              const x1 = cx + shadowRadius;
+              const z1 = cz + shadowRadius;
+
+              const corners = [
+                { x: x0, z: z0 },
+                { x: x1, z: z0 },
+                { x: x1, z: z1 },
+                { x: x0, z: z1 }
+              ];
+
+              // Find the two corners that form the widest angle from the light source
+              const refAngle = Math.atan2(cz - lz, cx - lx);
+              let minDiff = Infinity;
+              let maxDiff = -Infinity;
+              let minCorner = corners[0];
+              let maxCorner = corners[0];
+
+              corners.forEach(c => {
+                let angle = Math.atan2(c.z - lz, c.x - lx);
+                let diff = angle - refAngle;
+                while (diff > Math.PI) diff -= Math.PI * 2;
+                while (diff < -Math.PI) diff += Math.PI * 2;
+                if (diff < minDiff) { minDiff = diff; minCorner = c; }
+                if (diff > maxDiff) { maxDiff = diff; maxCorner = c; }
+              });
+
+              const shadowLength = Math.sqrt(width * width + height * height);
+              
+              const d1 = Math.sqrt((minCorner.x - lx)**2 + (minCorner.z - lz)**2);
+              const p1x = minCorner.x + (minCorner.x - lx) / (d1 || 1) * shadowLength;
+              const p1z = minCorner.z + (minCorner.z - lz) / (d1 || 1) * shadowLength;
+              
+              const d2 = Math.sqrt((maxCorner.x - lx)**2 + (maxCorner.z - lz)**2);
+              const p2x = maxCorner.x + (maxCorner.x - lx) / (d2 || 1) * shadowLength;
+              const p2z = maxCorner.z + (maxCorner.z - lz) / (d2 || 1) * shadowLength;
+
+              tempCtx.beginPath();
+              tempCtx.moveTo(minCorner.x, minCorner.z);
+              tempCtx.lineTo(maxCorner.x, maxCorner.z);
+              tempCtx.lineTo(p2x, p2z);
+              tempCtx.lineTo(p1x, p1z);
+              tempCtx.closePath();
+              tempCtx.fillStyle = '#000';
+              tempCtx.fill();
+
+              // Also fill the caster area itself to ensure no light leaks through the object
+              tempCtx.fillRect(x0, z0, x1 - x0, z1 - z0);
+            }
+          }
+        }
+
+        // Blend temp canvas into main lightmap using screen
+        ctx.globalCompositeOperation = 'screen';
+        ctx.drawImage(tempCanvas, 0, 0);
+      });
+      
+      // Final pass: No baked light under service tunnels
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.fillStyle = '#000';
+      for (let z = 0; z < rows; z++) {
+        for (let x = 0; x < cols; x++) {
+          const tile = map[z][x];
+          if (tile === TileType.SERVICE_TUNNEL) {
+            ctx.fillRect(x * tileSize, z * tileSize, tileSize, tileSize);
+          }
+        }
+      }
+    };
+
+    const level = LEVELS[currentLevelId];
+    lightOverrides.current = level.lightOverrides || {};
 
     map.forEach((row, z) => {
       row.forEach((tile, x) => {
@@ -629,11 +960,10 @@ export default function App() {
         const floorGeo = new THREE.PlaneGeometry(TILE_SIZE, TILE_SIZE);
         
         // Floor
-        if (tile !== TileType.SERVICE_TUNNEL) {
-          const floor = new THREE.Mesh(floorGeo, floorMat);
-          floor.rotation.x = -Math.PI / 2;
-          floor.position.set(xPos, -2, zPos);
-          scene.add(floor);
+        if (currentLevelId === 3) {
+          const vFloor = createVaporwaveFloorGeometry();
+          vFloor.position.set(xPos, 0, zPos);
+          scene.add(vFloor);
         }
 
         // Ceiling
@@ -669,9 +999,14 @@ export default function App() {
             vent.position.set(xPos, -1.95, zPos);
             scene.add(vent);
             // Light from below
-            const ventLight = new THREE.PointLight(0x00ff88, 1, 3);
+            const propsV = TILE_PROPERTIES[tile];
+            const overrideV = lightOverrides.current[`${x},${z}`];
+            const intensityV = overrideV?.intensity ?? propsV?.lightIntensity ?? 1;
+            const radiusV = overrideV?.radius ?? propsV?.lightRadius ?? 1.0;
+            const ventLight = new THREE.PointLight(0x00ff88, intensityV, radiusV);
             ventLight.position.set(xPos, -1.8, zPos);
             scene.add(ventLight);
+            lightsRef.current.push({ light: ventLight, x, z, tile, radius: overrideV?.radius, intensity: overrideV?.intensity });
             break;
           case TileType.OBSTACLE:
             mesh = createObstacleGeometry();
@@ -689,9 +1024,11 @@ export default function App() {
           case TileType.LIGHT_MIDDLE:
           case TileType.DISPLAY_WALL:
           case TileType.RADAR_WALL:
+          case TileType.LAMP_WALL:
             // Add wall base
-            const wallBase = new THREE.Mesh(new THREE.BoxGeometry(TILE_SIZE, 4, TILE_SIZE), wallMat);
+            const wallBase = tile === TileType.LAMP_WALL ? createLampWallGeometry() : new THREE.Mesh(new THREE.BoxGeometry(TILE_SIZE, 4, TILE_SIZE), wallMat);
             wallBase.position.set(xPos, 0, zPos);
+            projectUVs(wallBase);
             scene.add(wallBase);
 
             // Check neighbors to place fixtures on visible faces
@@ -722,11 +1059,15 @@ export default function App() {
                     scene.add(screenMesh);
 
                     if (!lightAdded) {
+                      const props = TILE_PROPERTIES[tile];
+                      const override = lightOverrides.current[`${x},${z}`];
                       const color = tile === TileType.DISPLAY_WALL ? 0x00ff00 : (tile === TileType.RADAR_WALL ? 0x00ffff : 0xffff00);
-                      const pLight = new THREE.PointLight(color, 5, 10);
+                      const intensity = override?.intensity ?? props?.lightIntensity ?? 5;
+                      const radius = override?.radius ?? props?.lightRadius ?? 10;
+                      const pLight = new THREE.PointLight(color, intensity, radius);
                       pLight.position.set(xPos + n.pos[0] * 0.9, 0.5, zPos + n.pos[2] * 0.9);
                       scene.add(pLight);
-                      lightsRef.current[key] = pLight;
+                      lightsRef.current.push({ light: pLight, x, z, tile, radius: override?.radius, intensity: override?.intensity });
                       lightAdded = true;
                     }
                   } else {
@@ -737,10 +1078,14 @@ export default function App() {
                     scene.add(fixture);
                     
                     if (!lightAdded) {
-                      const pLight = new THREE.PointLight(0xffffff, isBottom ? 5 : 8, 10);
+                      const props = TILE_PROPERTIES[tile];
+                      const override = lightOverrides.current[`${x},${z}`];
+                      const intensity = override?.intensity ?? props?.lightIntensity ?? (isBottom ? 5 : 8);
+                      const radius = override?.radius ?? props?.lightRadius ?? 10;
+                      const pLight = new THREE.PointLight(0xffffff, intensity, radius);
                       pLight.position.set(xPos + n.pos[0] * 0.9, isBottom ? -1.5 : 0, zPos + n.pos[2] * 0.9);
                       scene.add(pLight);
-                      lightsRef.current[key] = pLight;
+                      lightsRef.current.push({ light: pLight, x, z, tile, radius: override?.radius, intensity: override?.intensity });
                       lightAdded = true;
                     }
                   }
@@ -793,9 +1138,14 @@ export default function App() {
           case TileType.SERVICE_PATH_JUNCTION:
             mesh = createServicePathGeometry(tile === TileType.SERVICE_PATH_STRAIGHT ? 'straight' : 'junction');
             if (tile === TileType.SERVICE_PATH_JUNCTION) {
-              const redLight = new THREE.PointLight(0xff0000, 5, 5);
+              const propsJ = TILE_PROPERTIES[tile];
+              const overrideJ = lightOverrides.current[`${x},${z}`];
+              const intensityJ = overrideJ?.intensity ?? propsJ?.lightIntensity ?? 5;
+              const radiusJ = overrideJ?.radius ?? propsJ?.lightRadius ?? 5;
+              const redLight = new THREE.PointLight(0xff0000, intensityJ, radiusJ);
               redLight.position.set(xPos, -1.8, zPos);
               scene.add(redLight);
+              lightsRef.current.push({ light: redLight, x, z, tile, radius: overrideJ?.radius, intensity: overrideJ?.intensity });
             }
             break;
           case TileType.BULKHEAD_DOOR:
@@ -821,25 +1171,123 @@ export default function App() {
               }
             }
             break;
+          case TileType.NEON_TUBE_CYAN:
+          case TileType.NEON_TUBE_PURPLE:
+          case TileType.NEON_TUBE_PINK:
+          case TileType.NEON_TUBE_WHITE:
+            let neonColor = 0x00ffff;
+            if (tile === TileType.NEON_TUBE_PURPLE) neonColor = 0x8800ff;
+            if (tile === TileType.NEON_TUBE_PINK) neonColor = 0xff00ff;
+            if (tile === TileType.NEON_TUBE_WHITE) neonColor = 0xffffff;
+            
+            const neonTube = createNeonTubeGeometry(neonColor);
+            neonTube.position.set(xPos, 1.9, zPos);
+            scene.add(neonTube);
+            
+            // Add glow planes (fixed to tube)
+            const glowWidth = 4;
+            const glowHeight = 8;
+            
+            // Top glow (horizontal, just below ceiling)
+            const glowTop = createGlowPlane(neonColor, glowWidth, glowHeight);
+            glowTop.position.set(xPos, 1.99, zPos);
+            glowTop.rotation.x = Math.PI / 2;
+            glowTop.name = 'neon_glow_fixed';
+            scene.add(glowTop);
+            
+            // Middle glow (horizontal, around the tube)
+            const glowMid = createGlowPlane(neonColor, glowWidth, glowHeight);
+            glowMid.position.set(xPos, 1.85, zPos);
+            glowMid.rotation.x = Math.PI / 2;
+            glowMid.name = 'neon_glow_fixed';
+            //scene.add(glowMid);
+
+            // Vertical glow (hanging down, XY plane)
+            const glowVertical = createGlowPlane(neonColor, glowWidth, glowHeight * 1);
+            glowVertical.position.set(xPos, 1.9, zPos);
+            glowVertical.name = 'neon_glow_fixed';
+            scene.add(glowVertical);
+
+            const propsN = TILE_PROPERTIES[tile];
+            const pLightN = new THREE.PointLight(neonColor, propsN?.lightIntensity ?? 25, propsN?.lightRadius ?? 2);
+            pLightN.position.set(xPos, 1.8, zPos);
+            scene.add(pLightN);
+            lightsRef.current.push({ light: pLightN, x, z, tile });
+            break;
+          case TileType.NEON_CORNER_WALL:
+            const cornerWall = createNeonCornerWallGeometry();
+            cornerWall.position.set(xPos, 0, zPos);
+            
+            // Check neighbors to rotate corner to empty space
+            const cNeighbors = [
+              { dx: 1, dz: 1, rot: 0 },
+              { dx: -1, dz: 1, rot: Math.PI / 2 },
+              { dx: -1, dz: -1, rot: Math.PI },
+              { dx: 1, dz: -1, rot: -Math.PI / 2 }
+            ];
+            for (const n of cNeighbors) {
+              const nx = x + n.dx;
+              const nz = z + n.dz;
+              if (nz >= 0 && nz < map.length && nx >= 0 && nx < map[0].length) {
+                if (map[nz][nx] === TileType.EMPTY) {
+                  cornerWall.rotation.y = n.rot;
+                  break;
+                }
+              }
+            }
+            projectUVs(cornerWall);
+            scene.add(cornerWall);
+            
+            // Add vertical glow (fixed cross-shape for better look)
+            const vGlow1 = createGlowPlane(0x00ffff, 4, 8);
+            // Calculate rotated position for glow
+            const glowOffset = 2.0;
+            const angle = cornerWall.rotation.y;
+            const gx = xPos + Math.cos(angle) * glowOffset - Math.sin(angle) * glowOffset;
+            const gz = zPos + Math.sin(angle) * glowOffset + Math.cos(angle) * glowOffset;
+            
+            vGlow1.position.set(gx, 0, gz);
+            vGlow1.rotation.y = angle + Math.PI / 4;
+            vGlow1.name = 'neon_glow_fixed';
+            scene.add(vGlow1);
+
+            const vGlow2 = createGlowPlane(0x00ffff, 4, 8);
+            vGlow2.position.set(gx, 0, gz);
+            vGlow2.rotation.y = angle - Math.PI / 4;
+            vGlow2.name = 'neon_glow_fixed';
+            scene.add(vGlow2);
+
+            const propsC1 = TILE_PROPERTIES[tile];
+            const pLightC = new THREE.PointLight(0x00ffff, propsC1?.lightIntensity ?? 2, propsC1?.lightRadius ?? 1);
+            pLightC.position.set(xPos + 1.8, 0, zPos + 1.8);
+            scene.add(pLightC);
+            lightsRef.current.push({ light: pLightC, x, z, tile });
+            break;
           case TileType.SERVICE_TUNNEL:
             mesh = createServiceTunnelGeometry();
-            const tunnelLight = new THREE.PointLight(0xffff00, 5, 5);
+            const propsT = TILE_PROPERTIES[tile];
+            const overrideT = lightOverrides.current[`${x},${z}`];
+            const intensityT = overrideT?.intensity ?? propsT?.lightIntensity ?? 5;
+            const radiusT = overrideT?.radius ?? propsT?.lightRadius ?? 5;
+            const tunnelLight = new THREE.PointLight(0xffff00, intensityT, radiusT);
             tunnelLight.position.set(xPos, -2, zPos);
             scene.add(tunnelLight);
+            lightsRef.current.push({ light: tunnelLight, x, z, tile, radius: overrideT?.radius, intensity: overrideT?.intensity });
             // Rotate to align with neighbors
             if ((x > 0 && map[z][x-1] === TileType.SERVICE_TUNNEL) || (x < map[0].length - 1 && map[z][x+1] === TileType.SERVICE_TUNNEL)) {
               mesh.rotation.y = Math.PI / 2;
             }
             break;
-          case TileType.LAMP_WALL:
-            mesh = createLampWallGeometry();
-            break;
           case TileType.CEILING_LAMP:
             mesh = createCeilingLampGeometry();
-            const lightC = new THREE.PointLight(0xffffff, 10, 20);
+            const propsC2 = TILE_PROPERTIES[tile];
+            const overrideC2 = lightOverrides.current[`${x},${z}`];
+            const intensityC2 = overrideC2?.intensity ?? propsC2?.lightIntensity ?? 10;
+            const radiusC2 = overrideC2?.radius ?? propsC2?.lightRadius ?? 20;
+            const lightC = new THREE.PointLight(0xffffff, intensityC2, radiusC2);
             lightC.position.set(xPos, 1.8, zPos);
             scene.add(lightC);
-            lightsRef.current[key] = lightC;
+            lightsRef.current.push({ light: lightC, x, z, tile, radius: overrideC2?.radius, intensity: overrideC2?.intensity });
             mesh.position.set(xPos, 1.9, zPos);
             scene.add(mesh);
             mesh = null;
@@ -855,6 +1303,7 @@ export default function App() {
           mesh.position.x += xPos + twistX;
           mesh.position.z += zPos + twistZ;
           mesh.rotation.y += twistRot;
+          projectUVs(mesh);
           scene.add(mesh);
         }
       });
@@ -877,6 +1326,8 @@ export default function App() {
 
     const animate = () => {
       requestAnimationFrame(animate);
+      frameCounterRef.current++;
+      const time = Date.now() * 0.001;
 
       // Smooth movement
       currentPos.current.lerp(targetPos.current, 0.1);
@@ -963,29 +1414,70 @@ export default function App() {
       });
 
       // Update overclocked lights
-      Object.entries(lightsRef.current).forEach(([key, light]) => {
-        const [kx, kz] = key.split(',').map(Number);
+      lightsRef.current.forEach(({ light: l, x: kx, z: kz, tile }) => {
         const tileKey = `${kx},${kz}`;
-        const l = light as THREE.PointLight;
-        const tile = map[kz][kx];
-        const baseIntensity = tile === TileType.CEILING_LAMP ? 10 : (tile === TileType.LIGHT_MIDDLE ? 8 : (tile === TileType.DISPLAY_WALL || tile === TileType.RADAR_WALL ? 5 : 5));
+        const dx = kx - logicalPos.current.x;
+        const dz = kz - logicalPos.current.z;
+        const dist = Math.sqrt(dx*dx + dz*dz);
 
+        // Check if behind player
+        let behind = false;
+        if (dx !== 0 || dz !== 0) {
+          if (logicalDir.current === Direction.NORTH && dz > 0) behind = true;
+          else if (logicalDir.current === Direction.SOUTH && dz < 0) behind = true;
+          else if (logicalDir.current === Direction.EAST && dx < 0) behind = true;
+          else if (logicalDir.current === Direction.WEST && dx > 0) behind = true;
+        }
+
+        // Apply LOD and behind check to rendering visibility
+        if (dist >= 10 || behind) {
+          l.visible = false;
+        } else {
+          l.visible = true;
+        }
+
+        let baseIntensity = tile === TileType.CEILING_LAMP ? 15 : (tile === TileType.LIGHT_MIDDLE ? 12 : (tile === TileType.DISPLAY_WALL || tile === TileType.RADAR_WALL ? 8 : 8));
+        
         if (overclockedTilesRef.current.has(tileKey)) {
           l.intensity = baseIntensity * 10 + Math.sin(Date.now() * 0.05) * 20;
           l.color.setHex(0xffffff);
         } else {
-          if (tile === TileType.LIGHT_BOTTOM) l.intensity = 5;
-          else if (tile === TileType.LIGHT_MIDDLE) l.intensity = 8;
-          else if (tile === TileType.CEILING_LAMP) l.intensity = 10;
+          if (tile === TileType.LIGHT_BOTTOM) l.intensity = 8;
+          else if (tile === TileType.LIGHT_MIDDLE) l.intensity = 12;
+          else if (tile === TileType.CEILING_LAMP) l.intensity = 15;
           else if (tile === TileType.DISPLAY_WALL) {
-            l.intensity = 5;
+            l.intensity = 8;
             l.color.setHex(0x00ff00);
           } else if (tile === TileType.RADAR_WALL) {
-            l.intensity = 5;
+            l.intensity = 8;
             l.color.setHex(0x00ffff);
+          } else if (tile === TileType.LAMP_WALL) {
+            l.intensity = 10 + Math.sin(Date.now() * 0.005) * 3;
+            l.color.setHex(0xffff00);
           }
         }
       });
+
+      // Update neon glow planes to face camera
+      if (sceneRef.current && cameraRef.current) {
+        sceneRef.current.traverse((child) => {
+          if (child.name === 'neon_glow_v') {
+            child.lookAt(cameraRef.current!.position);
+            
+            // Pulse effect
+            if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshBasicMaterial) {
+              const pulse = 0.8 + Math.sin(time * 0.005) * 0.2;
+              child.material.opacity = pulse;
+            }
+          } else if (child.name === 'neon_glow_fixed') {
+            // Pulse effect only for fixed glow
+            if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshBasicMaterial) {
+              const pulse = 0.8 + Math.sin(time * 0.005) * 0.2;
+              child.material.opacity = pulse;
+            }
+          }
+        });
+      }
 
       // Update projectiles
       if (projectilesRef.current.length > 0) {
@@ -1016,39 +1508,75 @@ export default function App() {
         }
       }
 
-      // Update display animation (only if near a display wall to save performance)
-      const dpx = Math.round(logicalPos.current.x);
-      const dpz = Math.round(logicalPos.current.z);
+      // Check area around player for LOD and proximity
+      const dpx = logicalPos.current.x;
+      const dpz = logicalPos.current.z;
+      let minLampDist = 999;
+      let minDisplayDist = 999;
+      let minRadarDist = 999;
       let nearDisplay = false;
       let nearRadar = false;
       let nearLamps = false;
 
-      // Check 3x3 area around player for displays
-      for (let dz = -3; dz <= 3; dz++) {
-        for (let dx = -3; dx <= 3; dx++) {
+      for (let dz = -7; dz <= 7; dz++) {
+        for (let dx = -7; dx <= 7; dx++) {
           const tx = dpx + dx;
           const tz = dpz + dz;
           if (tz >= 0 && tz < map.length && tx >= 0 && tx < map[0].length) {
             const tile = map[tz][tx];
-            if (tile === TileType.DISPLAY_WALL) nearDisplay = true;
-            if (tile === TileType.RADAR_WALL) nearRadar = true;
-            if (tile === TileType.LAMP_WALL) nearLamps = true;
+            const dist = Math.sqrt(dx*dx + dz*dz);
+            
+            // Check if behind player
+            let behind = false;
+            if (dx !== 0 || dz !== 0) {
+              if (logicalDir.current === Direction.NORTH && dz > 0) behind = true;
+              else if (logicalDir.current === Direction.SOUTH && dz < 0) behind = true;
+              else if (logicalDir.current === Direction.EAST && dx < 0) behind = true;
+              else if (logicalDir.current === Direction.WEST && dx > 0) behind = true;
+            }
+
+            if (!behind) {
+              if (tile === TileType.DISPLAY_WALL && dist <= 7) {
+                nearDisplay = true;
+                if (dist < minDisplayDist) minDisplayDist = dist;
+              }
+              if (tile === TileType.RADAR_WALL && dist <= 7) {
+                nearRadar = true;
+                if (dist < minRadarDist) minRadarDist = dist;
+              }
+              if (tile === TileType.LAMP_WALL && dist <= 7) {
+                nearLamps = true;
+                if (dist < minLampDist) minLampDist = dist;
+              }
+            }
           }
         }
       }
 
-      if (displayCtxRef.current && nearDisplay) {
+      let lampLOD = 4;
+      if (minLampDist < 3) lampLOD = 1;
+      else if (minLampDist < 5) lampLOD = 2;
+      else if (minLampDist < 7) lampLOD = 3;
+
+      const shouldUpdateHighFreq = (dist: number) => dist <= 3 || frameCounterRef.current % 4 === 0;
+
+      if (displayCtxRef.current && nearDisplay && shouldUpdateHighFreq(minDisplayDist)) {
         draw(displayCtxRef.current, Date.now());
         displayTexture.needsUpdate = true;
       }
 
-      if (lampCtxRef.current && nearLamps) {
-        drawLamps(lampCtxRef.current, Date.now());
+      if (lampCtxRef.current && lampLOD < 4 && shouldUpdateHighFreq(minLampDist)) {
+        drawLamps(lampCtxRef.current, Date.now(), lampLOD);
         lampTexture.needsUpdate = true;
       }
 
+      if (lightMapCtxRef.current) {
+        updateLightMap(lightMapCtxRef.current, map, lightsRef.current);
+        lightMapTexture.needsUpdate = true;
+      }
+
       // Update radar animation
-      if (radarCtxRef.current && nearRadar) {
+      if (radarCtxRef.current && nearRadar && shouldUpdateHighFreq(minRadarDist)) {
         drawRadar(radarCtxRef.current);
         radarTexture.needsUpdate = true;
       }
@@ -1077,6 +1605,137 @@ export default function App() {
           fogRef.current.color.copy(fogColor);
           scene.background = fogColor;
         }
+      }
+
+      // Debug View Rendering
+      if (isDebugViewOpenRef.current && debugCtxRef.current && lightMapCanvasRef.current) {
+        const ctx = debugCtxRef.current;
+        const lCanvas = lightMapCanvasRef.current;
+        const canvas = debugCanvasRef.current!;
+        
+        if (canvas.width !== lCanvas.width || canvas.height !== lCanvas.height) {
+          canvas.width = lCanvas.width;
+          canvas.height = lCanvas.height;
+        }
+        
+        // Draw the actual lightmap
+        ctx.drawImage(lCanvas, 0, 0);
+        
+        // Draw map outline
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(0, 0, canvas.width, canvas.height);
+        
+        const tileSize = 16;
+
+        // Draw actual tile outlines and animated texture status
+        for (let z = 0; z < map.length; z++) {
+          for (let x = 0; x < map[0].length; x++) {
+            const tile = map[z][x];
+            if (tile !== TileType.EMPTY) {
+              ctx.strokeStyle = 'rgba(0, 255, 0, 0.15)';
+              ctx.lineWidth = 1;
+              ctx.strokeRect(x * tileSize, z * tileSize, tileSize, tileSize);
+              
+              if (tile === TileType.WALL || tile === TileType.PILLAR) {
+                ctx.fillStyle = 'rgba(0, 255, 0, 0.05)';
+                ctx.fillRect(x * tileSize, z * tileSize, tileSize, tileSize);
+              }
+              
+              // Animated texture status (red vs green block)
+              if (tile === TileType.DISPLAY_WALL || tile === TileType.RADAR_WALL || tile === TileType.LAMP_WALL) {
+                const dx = x - logicalPos.current.x;
+                const dz = z - logicalPos.current.z;
+                const dist = Math.sqrt(dx*dx + dz*dz);
+                
+                // Check if behind player
+                const dirVec = new THREE.Vector3(0, 0, -1);
+                if (playerRef.current) {
+                  dirVec.applyQuaternion(playerRef.current.quaternion);
+                }
+                const toTile = new THREE.Vector3(x - logicalPos.current.x, 0, z - logicalPos.current.z).normalize();
+                const dot = dirVec.dot(toTile);
+                
+                const isActive = dist <= 7 && dot > -0.5;
+                
+                ctx.fillStyle = isActive ? '#0f0' : '#f00';
+                ctx.fillRect(x * tileSize + 4, z * tileSize + 4, tileSize - 8, tileSize - 8);
+              }
+            }
+          }
+        }
+
+        // Draw active light sources
+        lightsRef.current.forEach(l => {
+          const dx = l.x - logicalPos.current.x;
+          const dz = l.z - logicalPos.current.z;
+          const dist = Math.sqrt(dx*dx + dz*dz);
+          
+          // Check if behind player
+          const dirVec = new THREE.Vector3(0, 0, -1);
+          if (playerRef.current) {
+            dirVec.applyQuaternion(playerRef.current.quaternion);
+          }
+          const toLight = new THREE.Vector3(l.x - logicalPos.current.x, 0, l.z - logicalPos.current.z).normalize();
+          const dot = dirVec.dot(toLight);
+          
+          const isActive = dist <= 10 && dot > -0.5;
+          
+          ctx.strokeStyle = '#fff';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.arc(
+            (l.x + 0.5) * tileSize, 
+            (l.z + 0.5) * tileSize, 
+            2, 0, Math.PI * 2
+          );
+          if (isActive) {
+            ctx.fillStyle = '#fff';
+            ctx.fill();
+          } else {
+            ctx.stroke();
+          }
+        });
+        
+        // Draw player
+        ctx.fillStyle = '#0f0';
+        ctx.beginPath();
+        ctx.arc(
+          (logicalPos.current.x + 0.5) * tileSize, 
+          (logicalPos.current.z + 0.5) * tileSize, 
+          6, 0, Math.PI * 2
+        );
+        ctx.fill();
+        
+        // Draw enemies
+        ctx.fillStyle = '#f00';
+        enemiesRef.current.forEach(enemy => {
+          ctx.beginPath();
+          ctx.arc(
+            (enemy.pos.x + 0.5) * tileSize, 
+            (enemy.pos.z + 0.5) * tileSize, 
+            5, 0, Math.PI * 2
+          );
+          ctx.fill();
+        });
+        
+        // Draw lights (full circle vs empty circle)
+        lightsRef.current.forEach(({ light, x, z }) => {
+          ctx.beginPath();
+          ctx.arc(
+            (x + 0.5) * tileSize, 
+            (z + 0.5) * tileSize, 
+            2, 0, Math.PI * 2
+          );
+          if (light.visible) {
+            ctx.fillStyle = '#ff0';
+            ctx.fill();
+          } else {
+            ctx.strokeStyle = '#ff0';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+          }
+        });
       }
     };
 
@@ -1180,6 +1839,95 @@ export default function App() {
     <div className="relative w-full h-screen overflow-hidden bg-black font-mono text-emerald-500 select-none touch-none">
       <div ref={containerRef} className="absolute inset-0" />
 
+      {/* Debug View */}
+      {isDebugViewOpen && (
+        <div className="fixed bottom-4 right-4 w-64 h-64 bg-black/90 border border-yellow-500/50 z-50 overflow-hidden pointer-events-none flex flex-col">
+          <div className="p-2 border-b border-yellow-500/20 flex justify-between items-center">
+            <span className="text-[10px] font-mono text-yellow-500 uppercase tracking-widest">Debug View</span>
+            <span className="text-[8px] font-mono text-yellow-500/50 uppercase">F10 to toggle</span>
+          </div>
+          <div className="flex-1 relative">
+            <canvas 
+              ref={(canvas) => {
+                debugCanvasRef.current = canvas;
+                if (canvas) {
+                  debugCtxRef.current = canvas.getContext('2d');
+                }
+              }}
+              className="w-full h-full object-contain"
+            />
+          </div>
+          <div className="p-1 bg-yellow-500/10 text-[8px] font-mono text-yellow-500/70 flex justify-around">
+            <span>P: {logicalPos.current.x},{logicalPos.current.z}</span>
+            <span>E: {enemies.length}</span>
+            <span>L: {lightsRef.current.length}</span>
+            <span className={isLightmapActive ? "text-emerald-500" : "text-red-500"}>
+              LM: {isLightmapActive ? "ON" : "OFF"}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Level Transition Overlay */}
+      <AnimatePresence>
+        {isTransitioning && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] bg-black flex flex-col items-center justify-center text-emerald-500 font-mono"
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ delay: 0.5 }}
+              className="text-center"
+            >
+              <div className="text-xs opacity-50 mb-2 tracking-[0.3em]">INITIATING SECTOR TRANSFER</div>
+              <div className="text-4xl md:text-6xl font-bold tracking-tighter mb-8">{transitionLevelName}</div>
+              
+              <div className="w-64 h-1 bg-emerald-900/30 mx-auto relative overflow-hidden">
+                <motion.div 
+                  className="absolute inset-y-0 left-0 bg-emerald-500"
+                  initial={{ width: "0%" }}
+                  animate={{ width: "100%" }}
+                  transition={{ duration: 2, ease: "easeInOut" }}
+                />
+              </div>
+              
+              <motion.div 
+                animate={{ opacity: [0.3, 1, 0.3] }}
+                transition={{ duration: 1.5, repeat: Infinity }}
+                className="mt-4 text-[10px] tracking-widest"
+              >
+                SYNCHRONIZING SYSTEMS...
+              </motion.div>
+            </motion.div>
+            
+            {/* Decorative scanlines */}
+            <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] z-10 bg-[length:100%_2px,3px_100%]" />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Mobile Debug Buttons */}
+      {isMobile && (
+        <div className="absolute top-4 left-0 w-full px-4 flex justify-between pointer-events-none z-50">
+          <button 
+            onPointerDown={(e) => { e.preventDefault(); setIsDebugViewOpen(prev => !prev); }}
+            className="pointer-events-auto bg-black/60 border border-emerald-500/30 px-3 py-1 rounded text-[10px] text-emerald-500/70 active:bg-emerald-500/20 touch-none select-none"
+          >
+            DEBUG
+          </button>
+          <button 
+            onPointerDown={(e) => { e.preventDefault(); setIsLightmapActive(prev => !prev); }}
+            className="pointer-events-auto bg-black/60 border border-emerald-500/30 px-3 py-1 rounded text-[10px] text-emerald-500/70 active:bg-emerald-500/20 touch-none select-none"
+          >
+            LIGHTMAP
+          </button>
+        </div>
+      )}
+
       {/* HUD */}
       <div className="absolute top-0 left-0 w-full p-4 pointer-events-none flex justify-between items-start">
         <div className="flex flex-col gap-2 bg-black/40 backdrop-blur-md p-4 rounded-xl border border-emerald-500/20">
@@ -1215,13 +1963,12 @@ export default function App() {
               <Crosshair className="w-3 h-3" /> GUN: {gameState.stats.firearm}
             </div>
           </div>
+          <div className="mt-2 text-[10px] text-emerald-500/50 font-mono tracking-widest uppercase border-t border-emerald-500/10 pt-2">
+            LOCATION: {levelName}
+          </div>
         </div>
 
         <div className="flex flex-col items-end gap-2">
-          <div className="text-right">
-            <div className="text-xs opacity-50">LOCATION</div>
-            <div className="text-lg font-bold tracking-tighter">SECTOR {gameState.playerPos.x}-{gameState.playerPos.z}</div>
-          </div>
           {gameState.isDefending && (
             <motion.div 
               initial={{ opacity: 0, scale: 0.8 }}
@@ -1242,6 +1989,24 @@ export default function App() {
           )}
         </div>
       </div>
+
+      {/* Mobile Debug Buttons */}
+      {isMobile && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 flex gap-2 z-50">
+          <button 
+            onClick={() => setIsDebugViewOpen(prev => !prev)}
+            className="p-2 bg-black/50 border border-white/20 rounded-full text-white pointer-events-auto"
+          >
+            <ArrowUp className="w-5 h-5" />
+          </button>
+          <button 
+            onClick={() => setIsLightmapActive(prev => !prev)}
+            className="p-2 bg-black/50 border border-white/20 rounded-full text-white pointer-events-auto"
+          >
+            <Lightbulb className="w-5 h-5" />
+          </button>
+        </div>
+      )}
 
       {/* Game Over Overlay */}
       <AnimatePresence>
@@ -1264,29 +2029,57 @@ export default function App() {
         )}
       </AnimatePresence>
 
+      {/* Radar UI */}
+      <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-0">
+        <div className="relative w-[400px] h-[400px] flex items-center justify-center">
+          {/* Outer Ring */}
+          <div className="absolute inset-0 border border-emerald-500/10 rounded-full" />
+          <div className="absolute inset-4 border border-emerald-500/5 rounded-full" />
+          
+          {/* Scanning Pulse */}
+          <motion.div 
+            className="absolute inset-0 border-2 border-emerald-500/20 rounded-full"
+            animate={{ scale: [1, 1.1], opacity: [0.3, 0] }}
+            transition={{ duration: 3, repeat: Infinity, ease: "easeOut" }}
+          />
+
+          {/* Compass Ticks */}
+          {[0, 45, 90, 135, 180, 225, 270, 315].map(deg => (
+            <div 
+              key={deg}
+              className={`absolute w-[1px] ${deg % 90 === 0 ? 'h-4 bg-emerald-500/40' : 'h-2 bg-emerald-500/20'}`}
+              style={{ 
+                top: 0,
+                left: '50%',
+                transform: `translateX(-50%) rotate(${deg}deg)`,
+                transformOrigin: '50% 200px'
+              }}
+            />
+          ))}
+        </div>
+      </div>
+
       {/* Enemy Arrows */}
-      <div className="absolute inset-0 pointer-events-none overflow-hidden">
+      <div className="absolute inset-0 pointer-events-none overflow-hidden z-10">
         {enemies.map(enemy => {
           const dx = enemy.pos.x - currentPos.current.x / TILE_SIZE;
           const dz = enemy.pos.z - currentPos.current.z / TILE_SIZE;
           const dist = Math.sqrt(dx * dx + dz * dz);
-          if (dist > 5) return null; // Only show nearby
+          if (dist > 8) return null; // Increased range for radar
 
-          // Angle to enemy in world space
           const angleToEnemy = Math.atan2(dx, dz);
-          
-          // Use visual rotation for smoother arrow movement
           const playerAngle = currentRot.current;
-
           const relativeAngle = playerAngle - angleToEnemy;
           
-          // If enemy is roughly in front, don't show arrow
-          if (Math.abs(relativeAngle) < Math.PI / 4 || Math.abs(relativeAngle) > 7 * Math.PI / 4) return null;
+          // If enemy is roughly in front and close, don't show arrow to avoid clutter
+          if (dist < 2 && (Math.abs(relativeAngle) < Math.PI / 6 || Math.abs(relativeAngle) > 11 * Math.PI / 6)) return null;
 
           return (
-            <div 
+            <motion.div 
               key={enemy.id}
-              className="absolute w-6 h-6 text-red-500/50"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="absolute w-4 h-4 text-red-500/60"
               style={{
                 left: '50%',
                 top: '50%',
@@ -1294,14 +2087,23 @@ export default function App() {
               }}
             >
               <ArrowUp className="w-full h-full" />
-            </div>
+              {/* Distance indicator */}
+              <div className="absolute top-6 left-1/2 -translate-x-1/2 text-[8px] font-bold text-red-500/40 whitespace-nowrap">
+                {Math.round(dist * 4)}m
+              </div>
+            </motion.div>
           );
         })}
       </div>
 
       {/* Center Reticle */}
-      <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-30">
-        <div className="w-8 h-8 border border-emerald-500/50 rounded-full flex items-center justify-center">
+      <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-50 z-20">
+        <div className="relative w-12 h-12 flex items-center justify-center">
+          <div className="absolute inset-0 border border-emerald-500/30 rounded-full" />
+          <div className="absolute w-4 h-[1px] bg-emerald-500/50 left-0" />
+          <div className="absolute w-4 h-[1px] bg-emerald-500/50 right-0" />
+          <div className="absolute h-4 w-[1px] bg-emerald-500/50 top-0" />
+          <div className="absolute h-4 w-[1px] bg-emerald-500/50 bottom-0" />
           <div className="w-1 h-1 bg-emerald-500 rounded-full" />
         </div>
       </div>

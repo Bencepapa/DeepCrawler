@@ -130,10 +130,12 @@ export function createLightFixtureGeometry(position: 'bottom' | 'middle') {
   
   const fixture = new THREE.BoxGeometry(0.5, 0.5, 0.1);
   const fixtureMesh = new THREE.Mesh(fixture, material);
+  fixtureMesh.name = 'fixture_base';
   group.add(fixtureMesh);
   
   const light = new THREE.BoxGeometry(0.3, 0.3, 0.05);
   const lightMesh = new THREE.Mesh(light, lightMat);
+  lightMesh.name = 'fixture_light';
   lightMesh.position.z = 0.05;
   group.add(lightMesh);
   
@@ -147,10 +149,12 @@ export function createCeilingLampGeometry() {
   
   const fixture = new THREE.CylinderGeometry(0.5, 0.5, 0.2, 8);
   const fixtureMesh = new THREE.Mesh(fixture, material);
+  fixtureMesh.name = 'fixture_base';
   group.add(fixtureMesh);
   
   const light = new THREE.CylinderGeometry(0.4, 0.4, 0.1, 8);
   const lightMesh = new THREE.Mesh(light, lightMat);
+  lightMesh.name = 'fixture_light';
   lightMesh.position.y = -0.1;
   group.add(lightMesh);
   
@@ -306,3 +310,126 @@ export function createServiceTunnelGeometry() {
   
   return group;
 }
+
+export function createNeonTubeGeometry(color: number) {
+  const group = new THREE.Group();
+  const material = new THREE.MeshStandardMaterial({ color: 0x333333 });
+  const neonMat = new THREE.MeshStandardMaterial({ 
+    color: 0xffffff, //color, 
+    emissive: color, 
+    emissiveIntensity: 15 
+  });
+  
+  // Fixture
+  const fixture = new THREE.BoxGeometry(3, 0.2, 0.2);
+  const fixtureMesh = new THREE.Mesh(fixture, material);
+  group.add(fixtureMesh);
+  
+  // Tube
+  const tube = new THREE.CylinderGeometry(0.05, 0.05, 2.8, 8);
+  const tubeMesh = new THREE.Mesh(tube, neonMat);
+  tubeMesh.rotation.z = Math.PI / 2;
+  tubeMesh.position.y = -0.1;
+  group.add(tubeMesh);
+  
+  return group;
+}
+
+export function createNeonCornerWallGeometry() {
+  const group = new THREE.Group();
+  const wallMat = new THREE.MeshStandardMaterial({ color: 0x333333, metalness: 0.8, roughness: 0.2 });
+  const neonMat = new THREE.MeshStandardMaterial({ 
+    color: 0x00ffff, 
+    emissive: 0x00ffff, 
+    emissiveIntensity: 20 
+  });
+  
+  // Main wall block
+  const wall = new THREE.BoxGeometry(4, 4, 4);
+  const wallMesh = new THREE.Mesh(wall, wallMat);
+  group.add(wallMesh);
+  
+  // Vertical neon tube at corner
+  const tube = new THREE.CylinderGeometry(0.1, 0.1, 4, 8);
+  const tubeMesh = new THREE.Mesh(tube, neonMat);
+  tubeMesh.position.set(2.0, 0, 2.0);
+  group.add(tubeMesh);
+
+  return group;
+}
+
+export function createVaporwaveFloorGeometry() {
+  const group = new THREE.Group();
+  const floorMat = new THREE.MeshStandardMaterial({ color: 0x050505 });
+  const gridMat = new THREE.MeshStandardMaterial({ color: 0xff00ff, emissive: 0xff00ff, emissiveIntensity: 2 });
+  
+  const floor = new THREE.PlaneGeometry(4, 4);
+  const floorMesh = new THREE.Mesh(floor, floorMat);
+  floorMesh.rotation.x = -Math.PI / 2;
+  floorMesh.position.y = -2;
+  group.add(floorMesh);
+  
+  // Grid lines (outline)
+  const lineSize = 0.05;
+  const lines = [
+    { w: 4, h: lineSize, x: 0, z: -1.95 },
+    { w: 4, h: lineSize, x: 0, z: 1.95 },
+    { w: lineSize, h: 4, x: -1.95, z: 0 },
+    { w: lineSize, h: 4, x: 1.95, z: 0 }
+  ];
+  
+  lines.forEach(l => {
+    const line = new THREE.PlaneGeometry(l.w, l.h);
+    const lineMesh = new THREE.Mesh(line, gridMat);
+    lineMesh.rotation.x = -Math.PI / 2;
+    lineMesh.position.set(l.x, -1.99, l.z);
+    group.add(lineMesh);
+  });
+  
+  return group;
+}
+
+export function createGlowPlane(color: number, width: number, height: number) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 32;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d')!;
+  const gradient = ctx.createRadialGradient(16, 16, 4, 16, 16, 16);
+  const c = new THREE.Color(color);
+  const rgbaWhite = (a: number) => `rgba(${Math.floor(c.r * 128+128)}, ${Math.floor(c.g * 128+128)}, ${Math.floor(c.b * 128+128)}, ${a/2})`;
+  const rgba = (a: number) => `rgba(${Math.floor(c.r * 255)}, ${Math.floor(c.g * 255)}, ${Math.floor(c.b * 255)}, ${a})`;
+  
+  const gradient2 = ctx.createLinearGradient(0, 0, 0, 32);
+  
+  gradient2.addColorStop(0, rgba(0));
+  gradient2.addColorStop(0.47, rgba(0.3));
+  gradient2.addColorStop(0.5, rgba(0.8));
+  gradient2.addColorStop(0.53, rgba(0.3));
+  gradient2.addColorStop(1, rgba(0));
+  //ctx.scale(1,1)
+
+  gradient.addColorStop(0, rgba(0.7));
+  gradient.addColorStop(0.5, rgba(0.5));
+  gradient.addColorStop(1, rgba(0));
+  ctx.scale(1,8)
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, 32, 32);
+  ctx.fillStyle = gradient2;
+  ctx.fillRect(4, 0, 24, 32);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  const material = new THREE.MeshBasicMaterial({
+    map: texture,
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    side: THREE.DoubleSide,
+    depthWrite: false
+  });
+  
+  const geometry = new THREE.PlaneGeometry(width, height);
+  return new THREE.Mesh(geometry, material);
+}
+
+
+
+
