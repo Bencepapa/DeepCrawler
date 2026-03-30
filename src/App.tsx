@@ -2407,7 +2407,7 @@ export default function App() {
 
           const angleToEnemy = Math.atan2(dx, dz);
           const playerAngle = currentRot.current;
-          const relativeAngle = playerAngle - angleToEnemy;
+          const relativeAngle = playerAngle - angleToEnemy + Math.PI;
           
           // If enemy is roughly in front and close, don't show arrow to avoid clutter
           if (dist < 2 && (Math.abs(relativeAngle) < Math.PI / 6 || Math.abs(relativeAngle) > 11 * Math.PI / 6)) return null;

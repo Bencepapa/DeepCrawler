@@ -15,6 +15,36 @@
       "name": "Attach to Chrome",
       "port": 9222,
       "webRoot": "${workspaceFolder}"
+    },
+    {
+      "type": "pwa-node",
+      "request": "launch",
+      "name": "Launch Next.js (npm script)",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "${input:npmScript}"
+      ],
+      "env": {
+        "NODE_OPTIONS": "--inspect=9229"
+      },
+      "console": "integratedTerminal",
+      "autoAttachChildProcesses": true,
+      "restart": true
+    }
+  ],
+  "inputs": [
+    {
+      "type": "pickString",
+      "id": "npmScript",
+      "description": "Select the npm script to run to start the Next.js app",
+      "options": [
+        "dev",
+        "start",
+        "build",
+        "preview",
+        "lint"
+      ]
     }
   ]
 }
