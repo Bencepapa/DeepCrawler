@@ -27,6 +27,7 @@ export enum TileType {
   NEON_TUBE_PINK = 25,
   NEON_TUBE_WHITE = 26,
   NEON_CORNER_WALL = 27,
+  QUARANTINE_DISPLAY = 28,
 }
 
 export enum Direction {
@@ -36,6 +37,28 @@ export enum Direction {
   WEST = 3,
 }
 
+export enum DecalType {
+  POSTER = 'POSTER',
+  HULL_BREACH = 'HULL_BREACH',
+  BULLET_IMPACT = 'BULLET_IMPACT',
+  CLAW_MARK = 'CLAW_MARK',
+  CRACK = 'CRACK',
+  BULLET_SHELL = 'BULLET_SHELL',
+  SMUDGE = 'SMUDGE',
+}
+
+export interface Decal {
+  id: string;
+  type: DecalType;
+  pos: { x: number; y: number; z: number };
+  rot: { x: number; y: number; z: number };
+  scale: number;
+  size?: number;
+  metadata?: any;
+  cleaned?: boolean;
+  health?: number;
+}
+
 export interface PlayerStats {
   hp: number;
   maxHp: number;
@@ -43,6 +66,8 @@ export interface PlayerStats {
   firearm: number;
   oxygen: number;
   maxOxygen: number;
+  mopLevel: number;
+  torchLevel: number;
 }
 
 export interface GameState {
@@ -50,6 +75,11 @@ export interface GameState {
   playerDir: Direction;
   stats: PlayerStats;
   isDefending: boolean;
+  decals: Decal[];
+  cleanupProgress: number;
+  totalMess: number;
+  isQuarantineActive: boolean;
+  isQuarantineBypassed: boolean;
 }
 
 export interface MapTile {

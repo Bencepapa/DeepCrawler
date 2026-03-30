@@ -36,7 +36,14 @@ import {
   createNeonTubeGeometry,
   createNeonCornerWallGeometry,
   createVaporwaveFloorGeometry,
-  createGlowPlane
+  createGlowPlane,
+  createPosterGeometry,
+  createHullBreachGeometry,
+  createBulletImpactGeometry,
+  createClawMarkGeometry,
+  createCrackGeometry,
+  createBulletShellGeometry,
+  createSmudgeGeometry
 } from './geometries';
 import { 
   Enemy, 
@@ -99,7 +106,17 @@ export default function App() {
     playerDir: Direction.EAST,
     stats: INITIAL_STATS,
     isDefending: false,
+    decals: [],
+    cleanupProgress: 0,
+    totalMess: 0,
+    isQuarantineActive: true,
+    isQuarantineBypassed: false,
   });
+  const gameStateRef = useRef<GameState>(gameState);
+
+  useEffect(() => {
+    gameStateRef.current = gameState;
+  }, [gameState]);
 
   const [levelName, setLevelName] = useState("SUB-DECK 4: MAINTENANCE");
   const [isTransitioning, setIsTransitioning] = useState(false);
@@ -321,7 +338,7 @@ export default function App() {
     }
   }, [checkCollision, isGameOver, isTransitioning, map, showMessage]);
 
-  const interact = useCallback(() => {
+  const handleUse = useCallback(() => {
     if (isGameOver || isTransitioning) return;
     const { x: px, z: pz } = logicalPos.current;
     const dir = logicalDir.current;
@@ -336,6 +353,73 @@ export default function App() {
     const tile = map[tz]?.[tx];
     const props = TILE_PROPERTIES[tile];
 
+    // Check for quarantine bypass
+    if (tile === TileType.QUARANTINE_DISPLAY) {
+      setGameState(prev => ({ ...prev, isQuarantineBypassed: true }));
+      showMessage("QUARANTINE BYPASSED");
+      return;
+    }
+
+    // Check for decals to clean/fix
+    const decalIndex = gameState.decals.findIndex(d => 
+      Math.abs(d.pos.x - tx) < 0.7 && Math.abs(d.pos.z - tz) < 0.7 && !d.cleaned
+    );
+
+    if (decalIndex !== -1) {
+      const decal = gameState.decals[decalIndex];
+      let cleaned = false;
+      let msg = "";
+
+      if (decal.type === 'SMUDGE' || decal.type === 'HULL_BREACH') {
+        const newDecals = [...gameState.decals];
+        const currentSize = newDecals[decalIndex].size || 1;
+        if (currentSize > 0.2) {
+          newDecals[decalIndex].size = currentSize - 0.2;
+          msg = decal.type === 'SMUDGE' ? "CLEANING SMUDGE..." : "REPAIRING HULL BREACH...";
+        } else {
+          newDecals[decalIndex].cleaned = true;
+          cleaned = true;
+          msg = decal.type === 'SMUDGE' ? "SMUDGE CLEANED" : "HULL BREACH REPAIRED";
+        }
+        
+        if (!cleaned) {
+          setGameState(prev => ({ ...prev, decals: newDecals }));
+          showMessage(msg);
+          return;
+        }
+      } else if (decal.type === 'POSTER') {
+        cleaned = true;
+        msg = "POSTER REMOVED";
+      }
+
+      if (cleaned) {
+        const newDecals = [...gameState.decals];
+        newDecals[decalIndex].cleaned = true;
+        
+        // Remove from scene
+        if (sceneRef.current) {
+          const obj = sceneRef.current.getObjectByName(newDecals[decalIndex].id);
+          if (obj) sceneRef.current.remove(obj);
+        }
+
+        const activeMess = newDecals.filter(d => !d.cleaned && (d.type === 'HULL_BREACH' || d.type === 'SMUDGE')).length;
+
+        setGameState(prev => ({
+          ...prev,
+          decals: newDecals,
+          cleanupProgress: prev.cleanupProgress + 1,
+          isQuarantineActive: activeMess > 0
+        }));
+        
+        if (activeMess === 0) {
+          showMessage("QUARANTINE LIFTED: ALL CRITICAL MESS CLEARED");
+        } else {
+          showMessage(`${msg}. ${activeMess} CRITICAL ITEMS REMAINING.`);
+        }
+        return;
+      }
+    }
+
     if (props?.openable) {
       if (tile === TileType.DOOR) {
         if (hasKey) {
@@ -348,6 +432,11 @@ export default function App() {
           showMessage("Door is locked. Need keycard.");
         }
       } else if (tile === TileType.BULKHEAD_DOOR) {
+        if (gameState.isQuarantineActive && !gameState.isQuarantineBypassed) {
+          const activeMess = gameState.decals.filter(d => !d.cleaned && (d.type === 'HULL_BREACH' || d.type === 'SMUDGE')).length;
+          showMessage(`QUARANTINE ACTIVE: ${activeMess} CRITICAL MESSES REMAINING. BYPASS AT TERMINAL OR CLEAN UP.`);
+          return;
+        }
         const nextLevelId = currentLevelId === 1 ? 2 : 3;
         setTransitionLevelName(LEVELS[nextLevelId].name);
         setIsTransitioning(true);
@@ -409,7 +498,7 @@ export default function App() {
     } else {
       showMessage("Nothing to interact with.");
     }
-  }, [isGameOver, isTransitioning, hasKey, map, showMessage]);
+  }, [isGameOver, isTransitioning, hasKey, map, showMessage, gameState.decals, gameState.isQuarantineActive, gameState.isQuarantineBypassed, currentLevelId]);
 
   const attack = useCallback(() => {
     if (isGameOver || isTransitioning) return;
@@ -497,8 +586,8 @@ export default function App() {
         case 'd': strafe(true); break;
         case 'q': case 'arrowleft': rotate(false); break;
         case 'e': case 'arrowright': rotate(true); break;
-        case ' ': interact(); break;
-        case 'f': attack(); break;
+        case 'f': handleUse(); break;
+        case ' ': attack(); break;
         case 'r': attack(); break;
         case 'shift': toggleDefense(); break;
       }
@@ -514,7 +603,7 @@ export default function App() {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [isGameOver, isTransitioning, move, rotate, interact, attack, toggleDefense]);
+  }, [isGameOver, isTransitioning, move, rotate, handleUse, attack, toggleDefense]);
 
   // Three.js Setup
   useEffect(() => {
@@ -684,6 +773,13 @@ export default function App() {
     lampTexture.minFilter = THREE.NearestFilter;
     lampTexture.magFilter = THREE.NearestFilter;
 
+    // Setup quarantine canvas
+    const quarantineCanvas = document.createElement('canvas');
+    quarantineCanvas.width = 256;
+    quarantineCanvas.height = 256;
+    const quarantineCtx = quarantineCanvas.getContext('2d');
+    const quarantineTexture = new THREE.CanvasTexture(quarantineCanvas);
+
     // Create a single large floor plane for baked lighting
     if (currentLevelId !== 3) {
       const floorGeo = new THREE.PlaneGeometry(map[0].length * TILE_SIZE, map.length * TILE_SIZE, 32, 32);
@@ -710,25 +806,81 @@ export default function App() {
     if (displayCtx) setup(displayCtx);
 
     const draw = (ctx: CanvasRenderingContext2D, time: number) => {
+      const hasBreach = gameStateRef.current.decals.some(d => d.type === 'HULL_BREACH' && !d.cleaned);
+      const color = hasBreach ? '#f00' : '#0f0';
+      
       ctx.fillStyle = '#000';
       ctx.fillRect(0, 0, 256, 256);
-      ctx.strokeStyle = '#0f0';
+      ctx.strokeStyle = color;
       ctx.lineWidth = 15;
       
       // Draw some "diagnostics"
+      const lineLength = hasBreach ? 40 : 180;
       ctx.beginPath();
-      for (let i = 0; i < 10; i++) {
-        const y = 50 + i * 19;
-        const x = 20 + Math.sin(time * 0.005 + i) * 10;
+      for (let i = 0; i < 6; i++) {
+        const y = 45 + i * 20;
+        const x = 10 + Math.sin(time * 0.005 + i) * 5;
         ctx.moveTo(20, y);
-        ctx.lineTo(200 + x, y);
+        ctx.lineTo(lineLength + x, y);
       }
       ctx.stroke();
       
-      ctx.fillStyle = '#0f0';
+      ctx.fillStyle = color;
       ctx.font = '16px monospace';
-      ctx.fillText(`SYSTEM OK: ${Math.floor(time / 1000)}s`, 20, 30);
-      ctx.fillText(`O2 LEVEL: ${Math.floor(Math.sin(time * 0.001) * 10 + 90)}%`, 20, 240);
+      if (hasBreach) {
+        ctx.fillText(`CRITICAL ERROR: ${Math.floor(time / 1000)}s`, 20, 30);
+        ctx.fillText(`O2 LEVEL: ${Math.floor(Math.sin(time * 0.01) * 5 + 15)}%`, 20, 240);
+        ctx.fillText(`HULL BREACH DETECTED`, 20, 220);
+      } else {
+        ctx.fillText(`SYSTEM OK: ${Math.floor(time / 1000)}s`, 20, 30);
+        ctx.fillText(`O2 LEVEL: ${Math.floor(Math.sin(time * 0.001) * 10 + 95)}%`, 20, 240);
+      }
+    };
+
+    const drawQuarantine = (ctx: CanvasRenderingContext2D, time: number, active: boolean, bypassed: boolean) => {
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, 256, 256);
+      
+      if (bypassed) {
+        ctx.fillStyle = '#0f0';
+        ctx.font = 'bold 30px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('BYPASS ACTIVE', 128, 100);
+        ctx.font = '16px monospace';
+        ctx.fillText('SYSTEM OVERRIDE', 128, 140);
+        return;
+      }
+
+      if (active) {
+        const pulse = Math.sin(time * 0.01) * 0.5 + 0.5;
+        ctx.fillStyle = `rgba(255, 0, 0, ${0.2 + pulse * 0.3})`;
+        ctx.fillRect(0, 0, 256, 256);
+        
+        ctx.strokeStyle = '#f00';
+        ctx.lineWidth = 10;
+        ctx.strokeRect(10, 10, 236, 236);
+        
+        ctx.fillStyle = '#f00';
+        ctx.font = 'bold 32px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('QUARANTINE', 128, 80);
+        
+        ctx.font = '18px monospace';
+        ctx.fillText('BIOHAZARD DETECTED', 128, 120);
+        ctx.fillText('CLEANUP REQUIRED', 128, 150);
+        
+        ctx.font = '14px monospace';
+        ctx.fillText('DOORS LOCKED', 128, 200);
+      } else {
+        ctx.fillStyle = '#040';
+        ctx.fillRect(0, 0, 256, 256);
+        ctx.fillStyle = '#0f0';
+        ctx.font = 'bold 32px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('CLEARANCE', 128, 100);
+        ctx.font = '18px monospace';
+        ctx.fillText('SAFE TO PROCEED', 128, 140);
+      }
     };
 
     const drawRadar = (ctx: CanvasRenderingContext2D) => {
@@ -766,6 +918,21 @@ export default function App() {
       ctx.beginPath();
       ctx.arc(logicalPos.current.x * scaleX + scaleX/2, logicalPos.current.z * scaleY + scaleY/2, scaleX/3, 0, Math.PI * 2);
       ctx.fill();
+
+      // Draw signal wave if breach exists (as shown in screenshot)
+      if (gameStateRef.current.decals.some(d => d.type === 'HULL_BREACH' && !d.cleaned)) {
+        const time = Date.now() * 0.001;
+        ctx.strokeStyle = '#3366ff';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(64, 128);
+        for (let i = 64; i < 192; i += 3) {
+          const x = i;
+          const y = 128 + Math.sin(i * 0.05 + time * 5) * 15 + Math.cos(i * 0.1 + time * 3) * 10 + (Math.random() - 0.5) * 8;
+          ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+      }
     };
 
     const drawLamps = (ctx: CanvasRenderingContext2D, time: number, lod: number = 1) => {
@@ -842,7 +1009,7 @@ export default function App() {
           ctx.fillRect(x * tileSize, z * tileSize, tileSize, tileSize);
         }
       }
-      
+
       const tempCtx = tempLightCtxRef.current;
       const tempCanvas = tempLightCanvasRef.current;
       if (!tempCtx || !tempCanvas) return;
@@ -973,6 +1140,37 @@ export default function App() {
           }
         }
       }
+
+      // Draw Smudges on floor at the very last step with multiply blending
+      ctx.globalCompositeOperation = 'multiply';
+      gameStateRef.current.decals.forEach(d => {
+        if (d.type === 'SMUDGE' && !d.cleaned && d.pos.y < -1.9) {
+          const sx = (d.pos.x + 0.5) * tileSize;
+          const sz = (d.pos.z + 0.5) * tileSize;
+          const size = (d.size || 1) * tileSize;
+          const color = d.metadata?.color || 0x00ff00;
+          const hex = `#${color.toString(16).padStart(6, '0')}`;
+          
+          // For multiply, we want the "background" to be white where there's no smudge
+          // But since we are using globalCompositeOperation = 'multiply', 
+          // we are multiplying the existing lightmap by what we draw.
+          // So we should draw the smudge color on a white background? 
+          // No, we just draw the smudge. Where we don't draw anything, nothing changes.
+          // Actually, we should use a gradient that goes from the smudge color to white.
+          
+          const grad = ctx.createRadialGradient(sx, sz, size*0.9, sx, sz, size);
+          grad.addColorStop(0, hex);
+          grad.addColorStop(1, '#ffffff');
+          
+          ctx.fillStyle = grad;
+          ctx.beginPath();
+          ctx.arc(sx, sz, size, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      });
+      
+      // Reset composite operation
+      ctx.globalCompositeOperation = 'source-over';
     };
 
     const level = LEVELS[currentLevelId];
@@ -1052,6 +1250,7 @@ export default function App() {
           case TileType.DISPLAY_WALL:
           case TileType.RADAR_WALL:
           case TileType.LAMP_WALL:
+          case TileType.QUARANTINE_DISPLAY:
             // Add wall base
             const wallBase = tile === TileType.LAMP_WALL ? createLampWallGeometry() : new THREE.Mesh(new THREE.BoxGeometry(TILE_SIZE, 4, TILE_SIZE), wallMat);
             wallBase.position.set(xPos, 0, zPos);
@@ -1075,10 +1274,12 @@ export default function App() {
               if (nz >= 0 && nz < map.length && nx >= 0 && nx < map[0].length) {
                 const nTile = map[nz][nx];
                 if (nTile === TileType.EMPTY || nTile === TileType.VENT || nTile === TileType.KEY || nTile === TileType.SERVICE_TUNNEL) {
-                  if (tile === TileType.DISPLAY_WALL || tile === TileType.RADAR_WALL || tile === TileType.LAMP_WALL) {
+                  if (tile === TileType.DISPLAY_WALL || tile === TileType.RADAR_WALL || tile === TileType.LAMP_WALL || tile === TileType.QUARANTINE_DISPLAY) {
                     const screenGeo = new THREE.PlaneGeometry(2, 2);
                     const screenMat = new THREE.MeshBasicMaterial({ 
-                      map: tile === TileType.DISPLAY_WALL ? displayTexture : (tile === TileType.RADAR_WALL ? radarTexture : lampTexture)
+                      map: tile === TileType.DISPLAY_WALL ? displayTexture : 
+                           (tile === TileType.RADAR_WALL ? radarTexture : 
+                           (tile === TileType.QUARANTINE_DISPLAY ? quarantineTexture : lampTexture))
                     });
                     const screenMesh = new THREE.Mesh(screenGeo, screenMat);
                     screenMesh.position.set(xPos + n.pos[0], 0.5, zPos + n.pos[2]);
@@ -1088,7 +1289,9 @@ export default function App() {
                     if (!lightAdded) {
                       const props = TILE_PROPERTIES[tile];
                       const override = lightOverrides.current[`${x},${z}`];
-                      const color = tile === TileType.DISPLAY_WALL ? 0x00ff00 : (tile === TileType.RADAR_WALL ? 0x00ffff : 0xffff00);
+                      const color = tile === TileType.DISPLAY_WALL ? 0x00ff00 : 
+                                   (tile === TileType.RADAR_WALL ? 0x00ffff : 
+                                   (tile === TileType.QUARANTINE_DISPLAY ? 0xff0000 : 0xffff00));
                       const intensity = override?.intensity ?? props?.lightIntensity ?? 5;
                       const radius = override?.radius ?? props?.lightRadius ?? 10;
                       const pLight = new THREE.PointLight(color, intensity, radius);
@@ -1215,25 +1418,25 @@ export default function App() {
             const glowWidth = 4;
             const glowHeight = 8;
             
-            // Top glow (horizontal, just below ceiling)
-            const glowTop = createGlowPlane(neonColor, glowWidth, glowHeight);
-            glowTop.position.set(xPos, 1.99, zPos);
+            // Top glow (horizontal, along the tube)
+            const glowTop = createGlowPlane(neonColor, glowWidth, 16);
+            glowTop.position.set(xPos, 1.98, zPos);
             glowTop.rotation.x = Math.PI / 2;
+            //glowTop.rotation.z = Math.PI / 2; // Align with tube
             glowTop.name = 'neon_glow_fixed';
             scene.add(glowTop);
             
-            // Middle glow (horizontal, around the tube)
-            const glowMid = createGlowPlane(neonColor, glowWidth, glowHeight);
-            glowMid.position.set(xPos, 1.85, zPos);
-            glowMid.rotation.x = Math.PI / 2;
-            glowMid.name = 'neon_glow_fixed';
-            //scene.add(glowMid);
+            // Vertical glow (hanging down, XY plane cross-shape)
+            const glowVertical1 = createGlowPlane(neonColor, glowWidth, 12);
+            glowVertical1.position.set(xPos, 1.0, zPos); // Centered lower to hang down
+            glowVertical1.name = 'neon_glow_fixed';
+            scene.add(glowVertical1);
 
-            // Vertical glow (hanging down, XY plane)
-            const glowVertical = createGlowPlane(neonColor, glowWidth, glowHeight * 1);
-            glowVertical.position.set(xPos, 1.9, zPos);
-            glowVertical.name = 'neon_glow_fixed';
-            scene.add(glowVertical);
+            const glowVertical2 = createGlowPlane(neonColor, glowWidth, 12);
+            glowVertical2.position.set(xPos, 1.0, zPos);
+            glowVertical2.rotation.y = Math.PI / 2;
+            glowVertical2.name = 'neon_glow_fixed';
+            scene.add(glowVertical2);
 
             const propsN = TILE_PROPERTIES[tile];
             const pLightN = new THREE.PointLight(neonColor, propsN?.lightIntensity ?? 25, propsN?.lightRadius ?? 2);
@@ -1350,6 +1553,58 @@ export default function App() {
     water.position.y = -1.5;
     water.visible = false;
     scene.add(water);
+
+    // Render Decals
+    const levelDecals = level.decals || [];
+    levelDecals.forEach((d, i) => {
+      let decalMesh: THREE.Object3D | null = null;
+      switch (d.type) {
+        case 'POSTER':
+          decalMesh = createPosterGeometry(d.metadata?.posterType || 'motivational');
+          break;
+        case 'HULL_BREACH':
+          decalMesh = createHullBreachGeometry();
+          break;
+        case 'BULLET_IMPACT':
+          decalMesh = createBulletImpactGeometry();
+          break;
+        case 'CLAW_MARK':
+          decalMesh = createClawMarkGeometry();
+          break;
+        case 'CRACK':
+          decalMesh = createCrackGeometry();
+          break;
+        case 'BULLET_SHELL':
+          decalMesh = createBulletShellGeometry();
+          break;
+        case 'SMUDGE':
+          decalMesh = createSmudgeGeometry(d.metadata?.color || 0x00ff00);
+          break;
+      }
+
+      if (decalMesh) {
+        decalMesh.position.set(d.pos.x * TILE_SIZE, d.pos.y, d.pos.z * TILE_SIZE);
+        decalMesh.rotation.set(d.rot.x, d.rot.y, d.rot.z);
+        decalMesh.scale.setScalar(d.scale);
+        decalMesh.name = `decal_${i}`;
+        scene.add(decalMesh);
+      }
+    });
+
+    setGameState(prev => ({
+      ...prev,
+      decals: levelDecals.map((d, i) => ({
+        ...d,
+        id: `decal_${i}`,
+        cleaned: false,
+        size: (d.type === 'SMUDGE' || d.type === 'HULL_BREACH') ? 1 : undefined,
+        health: d.type === 'POSTER' ? 100 : undefined
+      })),
+      totalMess: levelDecals.length,
+      cleanupProgress: 0,
+      isQuarantineActive: levelDecals.some(d => d.type === 'HULL_BREACH' || d.type === 'SMUDGE'),
+      isQuarantineBypassed: false
+    }));
 
     const animate = () => {
       requestAnimationFrame(animate);
@@ -1485,6 +1740,16 @@ export default function App() {
         }
       });
 
+      // Update smudges and hull breaches in 3D scene
+      gameStateRef.current.decals.forEach((d, i) => {
+        if ((d.type === 'SMUDGE' || d.type === 'HULL_BREACH') && !d.cleaned) {
+          const mesh = scene.getObjectByName(`decal_${i}`);
+          if (mesh) {
+            mesh.scale.setScalar(d.scale * (d.size || 1));
+          }
+        }
+      });
+
       // Update neon glow planes to face camera
       if (sceneRef.current && cameraRef.current) {
         sceneRef.current.traverse((child) => {
@@ -1541,9 +1806,11 @@ export default function App() {
       let minLampDist = 999;
       let minDisplayDist = 999;
       let minRadarDist = 999;
+      let minQuarantineDist = 999;
       let nearDisplay = false;
       let nearRadar = false;
       let nearLamps = false;
+      let nearQuarantine = false;
 
       for (let dz = -7; dz <= 7; dz++) {
         for (let dx = -7; dx <= 7; dx++) {
@@ -1575,6 +1842,10 @@ export default function App() {
                 nearLamps = true;
                 if (dist < minLampDist) minLampDist = dist;
               }
+              if (tile === TileType.QUARANTINE_DISPLAY && dist <= 7) {
+                nearQuarantine = true;
+                if (dist < minQuarantineDist) minQuarantineDist = dist;
+              }
             }
           }
         }
@@ -1590,6 +1861,11 @@ export default function App() {
       if (displayCtxRef.current && nearDisplay && shouldUpdateHighFreq(minDisplayDist)) {
         draw(displayCtxRef.current, Date.now());
         displayTexture.needsUpdate = true;
+      }
+
+      if (quarantineCtx && nearQuarantine && shouldUpdateHighFreq(minQuarantineDist)) {
+        drawQuarantine(quarantineCtx, Date.now(), gameStateRef.current.isQuarantineActive, gameStateRef.current.isQuarantineBypassed);
+        quarantineTexture.needsUpdate = true;
       }
 
       if (lampCtxRef.current && lampLOD < 4 && shouldUpdateHighFreq(minLampDist)) {
@@ -2012,6 +2288,25 @@ export default function App() {
         </div>
 
         <div className="flex flex-col items-end gap-2">
+          {gameState.isQuarantineActive && !gameState.isQuarantineBypassed && (
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="flex items-center gap-2 bg-red-500/20 text-red-500 px-3 py-1 rounded-full border border-red-500/50 text-xs font-bold animate-pulse"
+            >
+              <AlertTriangle className="w-4 h-4" /> QUARANTINE ACTIVE
+            </motion.div>
+          )}
+          <div className="bg-black/60 backdrop-blur-md p-3 rounded-xl border border-emerald-500/20 text-right">
+            <div className="text-[10px] opacity-50 mb-1 tracking-widest">CLEANUP PROGRESS</div>
+            <div className="text-xl font-bold">{gameState.cleanupProgress} / {gameState.totalMess}</div>
+            <div className="w-32 h-1 bg-emerald-950 mt-2 rounded-full overflow-hidden">
+              <motion.div 
+                className="h-full bg-emerald-500"
+                animate={{ width: `${(gameState.totalMess > 0 ? (gameState.cleanupProgress / gameState.totalMess) * 100 : 100)}%` }}
+              />
+            </div>
+          </div>
           {gameState.isDefending && (
             <motion.div 
               initial={{ opacity: 0, scale: 0.8 }}
@@ -2223,7 +2518,7 @@ export default function App() {
               <Crosshair className="w-8 h-8 text-red-500" />
             </button>
             <button 
-              onPointerDown={(e) => { e.preventDefault(); interact(); }}
+              onPointerDown={(e) => { e.preventDefault(); handleUse(); }}
               className="w-16 h-16 bg-emerald-500/20 border border-emerald-500/50 rounded-full flex items-center justify-center active:bg-emerald-500/40 touch-none select-none"
             >
               <Hand className="w-8 h-8" />
@@ -2235,9 +2530,9 @@ export default function App() {
       {/* Desktop Instructions */}
       {!isMobile && (
         <div className="absolute bottom-4 left-4 text-[10px] opacity-30 pointer-events-none uppercase tracking-widest flex gap-6">
-          <span>WASD: MOVE/ROTATE</span>
-          <span>SPACE/R: ATTACK</span>
-          <span>F: INTERACT</span>
+          <span>WASD: MOVE</span>
+          <span>SPACE: INTERACT</span>
+          <span>F/R: ATTACK</span>
           <span>SHIFT: DEFEND</span>
         </div>
       )}

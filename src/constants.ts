@@ -11,14 +11,16 @@ export const INITIAL_STATS = {
   firearm: 15,
   oxygen: 100,
   maxOxygen: 100,
+  mopLevel: 1,
+  torchLevel: 1,
 };
 
 export const MAP_DATA: number[][] = [
   [1, 1, 21, 1, 1, 1, 1, 1, 1, 1],
   [1, 15, 0, 0, 0, 0, 0, 24, 0, 1],
   [14, 0, 2, 0, 5, 0, 3, 3, 0, 1],
-  [1, 0, 0, 0, 27, 0, 0, 0, 0, 1],
-  [1, 1, 5, 1, 21, 0, 7, 0, 26, 1],
+  [1, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+  [1, 1, 5, 1, 28, 0, 7, 0, 26, 1],
   [1, 0, 0, 0, 8, 0, 9, 0, 10, 1],
   [1, 0, 11, 12, 0, 6, 0, 2, 0, 1],
   [1, 0, 0, 0, 0, 0, 0, 0, 0, 1],
@@ -37,7 +39,7 @@ export const LEVEL_2_MAP: number[][] = [
   [1, 1, 1, 1, 27, 1, 17, 1, 1, 1, 1, 1, 1, 1, 1],
   [1, 21, 21, 21, 0, 0, 22, 22, 22, 22, 22, 0, 0, 0, 1],
   [1, 0, 0, 10, 0, 6, 22, 6, 0, 10, 0, 0, 0, 0, 1],
-  [1, 10, 0, 0, 0, 0, 22, 0, 0, 0, 0, 21, 0, 0, 1],
+  [1, 10, 0, 0, 0, 0, 22, 0, 0, 0, 0, 21, 0, 0, 28],
   [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 19, 1],
 ];
 
@@ -66,6 +68,7 @@ export interface LevelConfig {
   sectors?: SectorConfig[];
   defaultAmbient?: string;
   lightOverrides?: Record<string, { radius?: number; intensity?: number }>;
+  decals?: any[];
 }
 
 export const LEVELS: Record<number, LevelConfig> = {
@@ -80,19 +83,44 @@ export const LEVELS: Record<number, LevelConfig> = {
     ],
     lightOverrides: {
       "2,6": { radius: 15, intensity: 10 }, // Example override for a specific light
-    }
+    },
+    decals: [
+      { type: 'POSTER', pos: { x: 0.51, y: 0, z: 2.5 }, rot: { x: 0, y: Math.PI / 2, z: 0.1 }, scale: 1, metadata: { posterType: 'motivational' } },
+      { type: 'HULL_BREACH', pos: { x: 8.49, y: 0, z: 3.0 }, rot: { x: 0, y: -Math.PI / 2, z: 0 }, scale: 1.2 },
+      { type: 'SMUDGE', pos: { x: 5, y: -1.99, z: 5 }, rot: { x: -Math.PI / 2, y: 0, z: 0 }, scale: 2, metadata: { color: 0x00aa00 } },
+      { type: 'SMUDGE', pos: { x: 6, y: -1.99, z: 5 }, rot: { x: -Math.PI / 2, y: 0, z: 0 }, scale: 2, metadata: { color: 0x00aa00 } },
+      { type: 'SMUDGE', pos: { x: 6, y: -1.99, z: 6 }, rot: { x: -Math.PI / 2, y: 0, z: 0 }, scale: 2, metadata: { color: 0x010101 } },
+      // Bullet markings (auto-firing pattern)
+      { type: 'BULLET_IMPACT', pos: { x: 3.0, y: 0, z: 0.51 }, rot: { x: 0, y: 0, z: 0 }, scale: 0.5 },
+      { type: 'BULLET_IMPACT', pos: { x: 3.1, y: 0.1, z: 0.51 }, rot: { x: 0, y: 0, z: 0 }, scale: 0.4 },
+      { type: 'BULLET_IMPACT', pos: { x: 2.9, y: -0.1, z: 0.51 }, rot: { x: 0, y: 0, z: 0 }, scale: 0.45 },
+      { type: 'BULLET_IMPACT', pos: { x: 3.05, y: -0.05, z: 0.51 }, rot: { x: 0, y: 0, z: 0 }, scale: 0.35 },
+      
+      { type: 'CLAW_MARK', pos: { x: 0.51, y: 0.5, z: 7.5 }, rot: { x: 0, y: Math.PI / 2, z: 0 }, scale: 1 },
+      
+      // More bullet shell casings
+      { type: 'BULLET_SHELL', pos: { x: 5, y: -1.95, z: 4 }, rot: { x: 0, y: 0, z: 0 }, scale: 1 },
+      { type: 'BULLET_SHELL', pos: { x: 5.2, y: -1.95, z: 4.1 }, rot: { x: 0, y: 0.5, z: 0 }, scale: 1 },
+      { type: 'BULLET_SHELL', pos: { x: 4.8, y: -1.95, z: 3.9 }, rot: { x: 0, y: -0.3, z: 0 }, scale: 1 },
+      { type: 'BULLET_SHELL', pos: { x: 5.1, y: -1.95, z: 3.8 }, rot: { x: 0, y: 1.2, z: 0 }, scale: 1 },
+    ]
   },
   2: {
     name: "DECK 3: STORAGE BAY",
     map: LEVEL_2_MAP,
     lightmapEnabled: false,
+    decals: [
+      { type: 'POSTER', pos: { x: 0.51, y: 0, z: 2.5 }, rot: { x: 0, y: Math.PI / 2, z: 0.1 }, scale: 1, metadata: { posterType: 'motivational' } },
+      { type: 'SMUDGE', pos: { x: 5, y: -1.99, z: 5 }, rot: { x: -Math.PI / 2, y: 0, z: 0 }, scale: 2, metadata: { color: 0x000000 } },
+      { type: 'SMUDGE', pos: { x: 6, y: -1.99, z: 5 }, rot: { x: -Math.PI / 2, y: 0, z: 0 }, scale: 2, metadata: { color: 0x000000 } },
+      { type: 'SMUDGE', pos: { x: 6, y: -1.99, z: 6 }, rot: { x: -Math.PI / 2, y: 0, z: 0 }, scale: 2, metadata: { color: 0x000000 } },
+    ]
   },
   3: {
     name: "DECK 2: NEON DISTRICT",
     map: LEVEL_3_MAP,
     lightmapEnabled: true,
     defaultAmbient: '#000000',
-    //defaultAmbient: '#020205',
   }
 };
 
@@ -108,8 +136,8 @@ export const TILE_PROPERTIES: Record<number, ObstacleProperties> = {
   [TileType.OBSTACLE]: { shadowCasting: true, shadowRadius: 0.20, canJumpOver: true, canShootOver: true, destroyable: true, openable: false, walkable: false },
   [TileType.BARRICADE]: { shadowCasting: true, shadowRadius: 0.10, canJumpOver: true, canShootOver: true, destroyable: true, openable: false, walkable: false },
   [TileType.BOX]: { shadowCasting: true, shadowRadius: 0.25, canJumpOver: true, canShootOver: true, destroyable: true, openable: false, walkable: false },
-  [TileType.LIGHT_BOTTOM]: { shadowCasting: false, canJumpOver: false, canShootOver: true, destroyable: false, openable: false, walkable: true, lightRadius: 7, lightIntensity: 5 },
-  [TileType.LIGHT_MIDDLE]: { shadowCasting: false, canJumpOver: false, canShootOver: true, destroyable: false, openable: false, walkable: true, lightRadius: 7, lightIntensity: 8 },
+  [TileType.LIGHT_BOTTOM]: { shadowCasting: false, canJumpOver: false, canShootOver: true, destroyable: false, openable: false, walkable: false, lightRadius: 7, lightIntensity: 5 },
+  [TileType.LIGHT_MIDDLE]: { shadowCasting: false, canJumpOver: false, canShootOver: true, destroyable: false, openable: false, walkable: false, lightRadius: 7, lightIntensity: 8 },
   [TileType.CEILING_LAMP]: { shadowCasting: false, canJumpOver: false, canShootOver: true, destroyable: false, openable: false, walkable: true, lightRadius: 4, lightIntensity: 5 },
   [TileType.DISPLAY_WALL]: { shadowCasting: true, shadowRadius: 0.4, canJumpOver: false, canShootOver: false, destroyable: false, openable: false, walkable: false, lightRadius: 2, lightIntensity: 5 },
   [TileType.RADAR_WALL]: { shadowCasting: true, shadowRadius: 0.5, canJumpOver: false, canShootOver: false, destroyable: false, openable: false, walkable: false, lightRadius: 2, lightIntensity: 5 },
@@ -120,11 +148,12 @@ export const TILE_PROPERTIES: Record<number, ObstacleProperties> = {
   [TileType.SERVICE_PATH_STRAIGHT]: { shadowCasting: true, shadowRadius: 0.4, canJumpOver: false, canShootOver: true, destroyable: false, openable: false, walkable: true },
   [TileType.SERVICE_PATH_JUNCTION]: { shadowCasting: true, shadowRadius: 0.4, canJumpOver: false, canShootOver: true, destroyable: false, openable: false, walkable: true, lightRadius: 0.5, lightIntensity: 5 },
   [TileType.SERVICE_TUNNEL]: { shadowCasting: false, canJumpOver: false, canShootOver: true, destroyable: false, openable: false, walkable: true, lightRadius: 1.5, lightIntensity: 5 },
-  [TileType.NEON_TUBE_CYAN]: { shadowCasting: false, canJumpOver: false, canShootOver: true, destroyable: false, openable: false, walkable: true, lightRadius: 2, lightIntensity: 4 },
-  [TileType.NEON_TUBE_PURPLE]: { shadowCasting: false, canJumpOver: false, canShootOver: true, destroyable: false, openable: false, walkable: true, lightRadius: 2, lightIntensity: 4 },
-  [TileType.NEON_TUBE_PINK]: { shadowCasting: false, canJumpOver: false, canShootOver: true, destroyable: false, openable: false, walkable: true, lightRadius: 2, lightIntensity: 4 },
-  [TileType.NEON_TUBE_WHITE]: { shadowCasting: false, canJumpOver: false, canShootOver: true, destroyable: false, openable: false, walkable: true, lightRadius: 2, lightIntensity: 4 },
+  [TileType.NEON_TUBE_CYAN]: { shadowCasting: false, canJumpOver: false, canShootOver: true, destroyable: false, openable: false, walkable: true, lightRadius: 3, lightIntensity: 4 },
+  [TileType.NEON_TUBE_PURPLE]: { shadowCasting: false, canJumpOver: false, canShootOver: true, destroyable: false, openable: false, walkable: true, lightRadius: 3, lightIntensity: 4 },
+  [TileType.NEON_TUBE_PINK]: { shadowCasting: false, canJumpOver: false, canShootOver: true, destroyable: false, openable: false, walkable: true, lightRadius: 3, lightIntensity: 4 },
+  [TileType.NEON_TUBE_WHITE]: { shadowCasting: false, canJumpOver: false, canShootOver: true, destroyable: false, openable: false, walkable: true, lightRadius: 3, lightIntensity: 4 },
   [TileType.NEON_CORNER_WALL]: { shadowCasting: true, shadowRadius: 0.5, canJumpOver: false, canShootOver: false, destroyable: false, openable: false, walkable: false, lightRadius: 3, lightIntensity: 5 },
+  [TileType.QUARANTINE_DISPLAY]: { shadowCasting: true, shadowRadius: 0.4, canJumpOver: false, canShootOver: false, destroyable: false, openable: false, walkable: false, lightRadius: 2, lightIntensity: 5 },
 };
 
 export const TILE_DESCRIPTIONS: Record<number, string> = {
@@ -150,4 +179,5 @@ export const TILE_DESCRIPTIONS: Record<number, string> = {
   [TileType.NEON_TUBE_PINK]: "A horizontal pink neon tube, casting a bright glow.",
   [TileType.NEON_TUBE_WHITE]: "A horizontal white neon tube, casting a clean glow.",
   [TileType.NEON_CORNER_WALL]: "A wall with a bright vertical neon tube embedded in the corner.",
+  [TileType.QUARANTINE_DISPLAY]: "A security terminal showing a quarantine alert. Access restricted.",
 };

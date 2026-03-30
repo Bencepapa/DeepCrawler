@@ -389,33 +389,184 @@ export function createVaporwaveFloorGeometry() {
   return group;
 }
 
+export function createPosterGeometry(type: 'motivational' | 'warning') {
+  const group = new THREE.Group();
+  const canvas = document.createElement('canvas');
+  canvas.width = 128;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d')!;
+  
+  // Background
+  ctx.fillStyle = type === 'motivational' ? '#f0f0f0' : '#ffff00';
+  ctx.fillRect(0, 0, 128, 128);
+  
+  // Border
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 4;
+  ctx.strokeRect(2, 2, 124, 124);
+  
+  // Simple graphics
+  if (type === 'motivational') {
+    ctx.fillStyle = '#444';
+    ctx.font = 'bold 16px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('KEEP', 64, 40);
+    ctx.fillText('CLEAN', 64, 60);
+    ctx.fillStyle = '#00f';
+    ctx.beginPath();
+    ctx.arc(64, 90, 20, 0, Math.PI * 2);
+    ctx.fill();
+  } else {
+    ctx.fillStyle = '#000';
+    ctx.font = 'bold 16px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('WARNING', 64, 40);
+    ctx.beginPath();
+    ctx.moveTo(64, 60);
+    ctx.lineTo(84, 100);
+    ctx.lineTo(44, 100);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#ffff00';
+    ctx.fillText('!', 64, 95);
+  }
+  
+  const texture = new THREE.CanvasTexture(canvas);
+  const material = new THREE.MeshStandardMaterial({ map: texture, side: THREE.DoubleSide });
+  const poster = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
+  group.add(poster);
+  
+  return group;
+}
+
+export function createHullBreachGeometry() {
+  const group = new THREE.Group();
+  
+  // Black smudge behind
+  const smudgeMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.8 });
+  const smudge = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 1.5), smudgeMat);
+  smudge.position.z = -0.01;
+  group.add(smudge);
+  
+  // Cracked steel geometry
+  const steelMat = new THREE.MeshStandardMaterial({ color: 0x333333, metalness: 0.8, roughness: 0.2 });
+  for (let i = 0; i < 5; i++) {
+    const crack = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.2, 0.1), steelMat);
+    crack.rotation.z = (Math.random() - 0.5) * 2;
+    crack.position.x = (Math.random() - 0.5) * 0.5;
+    crack.position.y = (Math.random() - 0.5) * 0.5;
+    group.add(crack);
+  }
+  
+  return group;
+}
+
+export function createBulletImpactGeometry() {
+  const group = new THREE.Group();
+  const material = new THREE.MeshBasicMaterial({ color: 0x111111, transparent: true, opacity: 0.9 });
+  const impact = new THREE.Mesh(new THREE.CircleGeometry(0.1, 8), material);
+  group.add(impact);
+  return group;
+}
+
+export function createClawMarkGeometry() {
+  const group = new THREE.Group();
+  const material = new THREE.MeshBasicMaterial({ color: 0x221100, transparent: true, opacity: 0.7 });
+  for (let i = 0; i < 3; i++) {
+    const mark = new THREE.Mesh(new THREE.PlaneGeometry(0.05, 0.8), material);
+    mark.position.x = -0.1 + i * 0.1;
+    mark.rotation.z = 0.2;
+    group.add(mark);
+  }
+  return group;
+}
+
+export function createCrackGeometry() {
+  const group = new THREE.Group();
+  const material = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5 });
+  for (let i = 0; i < 4; i++) {
+    const crack = new THREE.Mesh(new THREE.PlaneGeometry(0.02, 1), material);
+    crack.rotation.z = Math.random() * Math.PI;
+    group.add(crack);
+  }
+  return group;
+}
+
+export function createBulletShellGeometry() {
+  const group = new THREE.Group();
+  const material = new THREE.MeshStandardMaterial({ color: 0xaa8800, metalness: 0.9, roughness: 0.1 });
+  const shell = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.1, 6), material);
+  shell.rotation.x = Math.PI / 2;
+  group.add(shell);
+  return group;
+}
+
+export function createSmudgeGeometry(color: number) {
+  const group = new THREE.Group();
+  const canvas = document.createElement('canvas');
+  canvas.width = 64;
+  canvas.height = 64;
+  const ctx = canvas.getContext('2d')!;
+  
+  const c = new THREE.Color(color);
+  const rgba = (a: number) => `rgba(${Math.floor(c.r * 255)}, ${Math.floor(c.g * 255)}, ${Math.floor(c.b * 255)}, ${a})`;
+  
+  const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grad.addColorStop(0, rgba(0.8));
+  grad.addColorStop(0.7, rgba(0.4));
+  grad.addColorStop(1, rgba(0));
+  
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(32, 32, 32, 0, Math.PI * 2);
+  ctx.fill();
+  
+  const texture = new THREE.CanvasTexture(canvas);
+  const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true, blending: THREE.AdditiveBlending });
+  const smudge = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
+  group.add(smudge);
+  
+  return group;
+}
+
 export function createGlowPlane(color: number, width: number, height: number) {
   const canvas = document.createElement('canvas');
   canvas.width = 32;
   canvas.height = 256;
   const ctx = canvas.getContext('2d')!;
-  const gradient = ctx.createRadialGradient(16, 16, 4, 16, 16, 16);
   const c = new THREE.Color(color);
-  const rgbaWhite = (a: number) => `rgba(${Math.floor(c.r * 128+128)}, ${Math.floor(c.g * 128+128)}, ${Math.floor(c.b * 128+128)}, ${a/2})`;
   const rgba = (a: number) => `rgba(${Math.floor(c.r * 255)}, ${Math.floor(c.g * 255)}, ${Math.floor(c.b * 255)}, ${a})`;
   
-  const gradient2 = ctx.createLinearGradient(0, 0, 0, 32);
-  
-  gradient2.addColorStop(0, rgba(0));
-  gradient2.addColorStop(0.47, rgba(0.3));
-  gradient2.addColorStop(0.5, rgba(0.8));
-  gradient2.addColorStop(0.53, rgba(0.3));
-  gradient2.addColorStop(1, rgba(0));
-  //ctx.scale(1,1)
+  // Clear canvas
+  ctx.clearRect(0, 0, 32, 256);
 
-  gradient.addColorStop(0, rgba(0.7));
-  gradient.addColorStop(0.5, rgba(0.5));
-  gradient.addColorStop(1, rgba(0));
-  ctx.scale(1,8)
-  ctx.fillStyle = gradient;
+  // Radial gradient for the core glow
+  const radialGradient = ctx.createRadialGradient(16, 16, 2, 16, 16, 16);
+  radialGradient.addColorStop(0, rgba(1.0));
+  radialGradient.addColorStop(0.2, rgba(0.8));
+  radialGradient.addColorStop(0.5, rgba(0.3));
+  radialGradient.addColorStop(1, rgba(0));
+
+  // Linear gradient for the long flare
+  const linearGradient = ctx.createLinearGradient(0, 0, 0, 32);
+  linearGradient.addColorStop(0, rgba(0));
+  linearGradient.addColorStop(0.45, rgba(0.4));
+  linearGradient.addColorStop(0.5, rgba(1.0));
+  linearGradient.addColorStop(0.55, rgba(0.4));
+  linearGradient.addColorStop(1, rgba(0));
+
+  ctx.save();
+  ctx.scale(1, 8); // Stretch vertically to 256
+  
+  // Draw radial glow
+  ctx.fillStyle = radialGradient;
   ctx.fillRect(0, 0, 32, 32);
-  ctx.fillStyle = gradient2;
-  ctx.fillRect(4, 0, 24, 32);
+  
+  // Draw linear flare (thinner and brighter)
+  ctx.fillStyle = linearGradient;
+  ctx.fillRect(8, 0, 16, 32);
+  
+  ctx.restore();
 
   const texture = new THREE.CanvasTexture(canvas);
   const material = new THREE.MeshBasicMaterial({
@@ -429,7 +580,3 @@ export function createGlowPlane(color: number, width: number, height: number) {
   const geometry = new THREE.PlaneGeometry(width, height);
   return new THREE.Mesh(geometry, material);
 }
-
-
-
-
