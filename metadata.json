@@ -1,5 +1,6 @@
 {
   "name": "Deep Space Crawler",
   "description": "A grid-based first-person sci-fi dungeon crawler with Three.js",
-  "requestFramePermissions": []
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
